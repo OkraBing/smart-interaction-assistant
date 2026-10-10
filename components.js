@@ -1,0 +1,2101 @@
+// P1 预置组件库：组件协议信封 → DOM。
+// 语义层+结构层在此实现；业务文案来自卡片配置/preset；视觉全部走 design token。
+// 任何渲染失败降级为纯文本（协议渲染兜底，§2.5），并上报 render_degraded。
+window.Components = (function () {
+  const { el } = UI;
+
+  // 交互系统：1) 交互后出现「重置」（提交后随组件冻结）；2) 组件定高，超出折叠为「展开全部」
+  function _enhance(node, envelope, ctx) {
+    if (!node.classList || !node.classList.contains("comp")) return;
+    if (envelope.semantic_category === "collect" && !node.classList.contains("comp-bare")) {
+      const resetBtn = el("button", { class: "comp-reset", type: "button", title: "清除已填内容，恢复初始状态" }, ["重置"]);
+      resetBtn.onclick = (e) => {
+        e.stopPropagation();
+        envelope._submitted = false;
+        envelope._resetRender = true;
+        const fresh = render(envelope, ctx);
+        node.replaceWith(fresh);
+      };
+      const sb = node.querySelector(".submit-bar, .cm-total");
+      if (sb) { resetBtn.classList.add("inbar"); sb.appendChild(resetBtn); }
+      else node.appendChild(resetBtn);
+      const markDirty = (e) => {
+        if (envelope._submitted) return;
+        if (e.target.closest && e.target.closest(".comp-reset")) return;
+        node.classList.add("dirty");
+      };
+      node.addEventListener("input", markDirty, true);
+      node.addEventListener("change", markDirty, true);
+      node.addEventListener("click", (e) => {
+        if (e.target.closest && (e.target.closest("button, .opt-item, .opt-card, .loc-row, .quick-chip"))) markDirty(e);
+      }, true);
+    }
+    // 定高：内容超过阈值折叠，点「展开全部」放开
+    if (ctx && ctx.preview) return; // 预览环境完整展示，不折叠
+    const CLAMP = 340;
+    const tryClamp = () => {
+      if (node._expanded || node.classList.contains("clamped")) return;
+      if (node.scrollHeight > CLAMP + 48) {
+        node.classList.add("clamped");
+        const bar = el("button", { class: "comp-expand", type: "button" }, ["展开全部"]);
+        bar.onclick = () => { node._expanded = true; node.classList.remove("clamped"); bar.remove(); };
+        node.appendChild(bar);
+      }
+    };
+    requestAnimationFrame(() => setTimeout(tryClamp, 60));
+  }
+
+  // v2 组件级样式覆盖：语义档位映射为设计变量，作用于本组件实例（优先于 .brand-scope 的品牌 token）
+  const OV_RADIUS = { none: ["0px", "0px"], sm: ["8px", "6px"], md: ["16px", "12px"], lg: ["22px", "16px"], full: ["28px", "22px"] };
+  const OV_PAD = { compact: "10px", regular: "16px", loose: "22px" };
+  const OV_FONT = { "-1": "13px", "1": "15px", "2": "16px" };
+  const OV_HEIGHT = { compact: "32px", regular: "40px", large: "48px" };
+  const OV_SHADOW = { none: "none", sm: "0 1px 3px rgba(15,27,38,.08)", md: "0 4px 12px rgba(15,27,38,.12)", lg: "0 8px 24px rgba(15,27,38,.18)" };
+  // 底色被覆盖成深色时，上面的文字得跟着翻成浅色，否则读不出来
+  function relLum(hex) {
+    const m = String(hex || "").trim().replace("#", "");
+    if (!/^[0-9a-f]{6}$/i.test(m)) return null;
+    const ch = [0, 2, 4].map(i => {
+      const v = parseInt(m.slice(i, i + 2), 16) / 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+  }
+  function inkOn(hex) {
+    const L = relLum(hex);
+    if (L == null) return null;
+    return (1.05 / (L + 0.05)) >= ((L + 0.05) / 0.05) ? "#FFFFFF" : "#0A0C10";
+  }
+  // 强调色当文字用时的可读性兜底：低于 4.5 就沿着同一色相提亮/压深到达标，
+  // 组件可以配得难看，但不能配到读不出来
+  function readableOn(fg, bg) {
+    const lf = relLum(fg), lb = relLum(bg);
+    if (lf == null || lb == null) return fg;
+    const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    if (ratio(lf, lb) >= 5.2) return fg;
+    const m = fg.trim().replace("#", "");
+    let [r, g, b] = [0, 2, 4].map(i => parseInt(m.slice(i, i + 2), 16));
+    const up = lb < 0.4;                 // 深底就提亮，浅底就压深
+    for (let i = 0; i < 64; i++) {
+      const hex = "#" + [r, g, b].map(v => v.toString(16).padStart(2, "0")).join("");
+      if (ratio(relLum(hex), lb) >= 5.2) return hex;   // 实际衬底比面板底略亮，留点余量
+      r = Math.max(0, Math.min(255, r + (up ? 6 : -6)));
+      g = Math.max(0, Math.min(255, g + (up ? 6 : -6)));
+      b = Math.max(0, Math.min(255, b + (up ? 6 : -6)));
+    }
+    return inkOn(bg) || fg;
+  }
+
+  // applyStyleOverrides 会往节点上写内联 CSS 变量和这些开关类。
+  // 就地更新样式前要先按这张表清掉，否则关掉一个开关旧类还留在上面。
+  const STYLE_CLASSES = ["btn-stretch", "col-left", "delta-invert", "density-compact", "density-loose",
+    "div-all", "div-none", "fb-square", "label-left", "layout-center", "layout-horizontal", "layout-stretch",
+    "metric-center", "mk-dot", "mk-none", "no-arrows", "no-baseline", "no-best", "no-caption", "no-cicon",
+    "no-connector", "no-delta", "no-desc", "no-halo", "no-handle", "no-inputborder", "no-legend",
+    "no-legendpct", "no-panel-border", "no-radio", "no-rec", "no-stepnum", "no-sum", "no-ts",
+    "options-grid", "options-inline", "rank-square", "sel-outline", "steps-vert", "tag-outline",
+    "tag-solid", "tl-dashed", "tl-square", "txt-center"];
+
+  function applyStyleOverrides(node, so, componentType) {
+    if (!so || typeof so !== "object") return;
+    const set = (k, v) => { if (v) node.style.setProperty(k, v); };
+    set("--primary", so["color.primary"]);
+    if (!String(componentType || "").startsWith("select.")) set("--brand-accent", so["color.accent"]);
+    // v2.4：数值型覆盖（px，样式设计器滑块输出）优先；旧档位 key 继续兼容
+    const px = (v, min) => { if (v == null || v === "") return null; const n = Number(v); return Number.isFinite(n) && n >= (min ?? 0) ? n : null; };
+    const rN = px(so.radius);
+    if (rN != null) { set("--radius-card", rN + "px"); set("--radius-control", Math.max(2, Math.round(rN * 0.75)) + "px"); }
+    else if (OV_RADIUS[so.radius]) { set("--radius-card", OV_RADIUS[so.radius][0]); set("--radius-control", OV_RADIUS[so.radius][1]); }
+    const pN = px(so.spacing);
+    set("--card-pad", pN != null ? pN + "px" : OV_PAD[so.spacing]);
+    const fN = px(so.font_scale, 10);   // ≥10 视为 px；更小是旧档位（"-1"/"1"/"2"）
+    set("--font-base", fN != null ? fN + "px" : OV_FONT[so.font_scale]);
+    const hN = px(so.height, 10);
+    set("--control-height", hN != null ? hN + "px" : OV_HEIGHT[so.height]);
+    set("--brand-shadow", OV_SHADOW[so.shadow]);
+    // 底色 → 这块底色上该用的墨色；次要文字按墨色派生，不再沿用浅底上的灰
+    const inkSet = (bg, vars, updateSurface = true) => {
+      const ink = inkOn(bg);
+      if (!ink) return;
+      vars.forEach(v => set(v, ink));
+      if (!updateSurface) return;
+      set("--text-primary", ink);
+      set("--text-secondary", `color-mix(in srgb, ${ink} 76%, ${bg})`);
+      set("--text-muted", `color-mix(in srgb, ${ink} 62%, ${bg})`);
+      // 底色一变，衬底与边框也得跟着走：只翻文字会翻出白底白字（表格斑马纹踩过）
+      set("--bg-surface", `color-mix(in srgb, ${ink} 7%, ${bg})`);
+      set("--bg-sunken", `color-mix(in srgb, ${ink} 4%, ${bg})`);
+      set("--bg-elevated", bg);
+      set("--border", `color-mix(in srgb, ${ink} 18%, ${bg})`);
+      set("--border-strong", `color-mix(in srgb, ${ink} 28%, ${bg})`);
+    };
+    if (so["panel.bg"]) { set("--bg-elevated", so["panel.bg"]); inkSet(so["panel.bg"], ["--ink-panel"]); }
+    // 选项底色只能影响选项本身；不能改写组件面板的 --bg-elevated / 全局文字色。
+    if (so["opt.bg"]) inkSet(so["opt.bg"], ["--ink-opt"], false);
+    if (so.sel_style === "outline") node.classList.add("sel-outline");
+    if (so.rec_chip === false) node.classList.add("no-rec");
+    // —— 组件参数（规格表键）：CSS 变量 ——
+    const pxv = (k, cssVar) => { const n = Number(so[k]); if (Number.isFinite(n)) set(cssVar, n + "px"); };
+    pxv("opt.gap", "--opt-gap"); pxv("card.gap", "--cand-gap"); pxv("list.gap", "--list-gap");
+    pxv("track.height", "--track-h"); pxv("thumb.size", "--thumb-s");
+    pxv("dot.size", "--lk-size"); pxv("dot.gap", "--lk-gap");
+    pxv("node.size", "--stp-node"); pxv("stepline.width", "--stp-line");
+    pxv("value.size", "--mv-size"); pxv("hl.size", "--hl-size"); pxv("pie.height", "--pie-h");
+    pxv("caption.size", "--cap-size");
+    if (so["hl.weight"]) set("--hl-weight", so["hl.weight"]);
+    if (so["caption.weight"]) set("--cap-weight", so["caption.weight"]);
+    if (so["caption.color"]) set("--cap-color", so["caption.color"]);
+    if (so["text.color"]) set("--text-ink", so["text.color"]);
+    if (so["text.weight"]) set("--text-weight", so["text.weight"]);
+    // 这几个是"彩色文字"，要相对当前面板底色保证读得出来
+    const panelBg = so["panel.bg"] || null;
+    const ink = (c) => (panelBg ? readableOn(c, panelBg) : c);
+    // 用主色当文字的地方（序号、最优值等）也要相对面板底色可读
+    if (panelBg) {
+      const pri = so["color.primary"]
+        || (getComputedStyle(document.documentElement).getPropertyValue("--primary") || "").trim()
+        || "#3E63DD";
+      set("--accent-ink", readableOn(pri, panelBg));
+    }
+    if (so["done.color"]) {
+      const dc = ink(so["done.color"]);
+      set("--stp-done", dc);
+      set("--on-stp-done", inkOn(dc));   // 已完成节点里的数字
+    }
+    if (so["marker.color"]) set("--mk-color", ink(so["marker.color"]));
+    if (so["header.bg"]) set("--th-bg", so["header.bg"]);
+    if (so["dot.color"]) set("--tl-dot", ink(so["dot.color"]));
+    if (so["input.bg"]) set("--input-bg", so["input.bg"]);
+    // —— 结构显隐 / 形态类 ——
+    const cls = (cond, name) => { if (cond) node.classList.add(name); };
+    cls(so["fb.shape"] === "square", "fb-square");
+    cls(so["btn.align"] === "stretch", "btn-stretch");
+    cls(so["icon.show"] === false, "no-cicon");
+    cls(so.halo === false, "no-halo");
+    cls(so["handle.show"] === false, "no-handle");
+    cls(so["no.style"] === "square", "rank-square");
+    cls(so["dot.shape"] === "square", "tl-square");
+    cls(so["tlline.style"] === "dashed", "tl-dashed");
+    cls(so["marker.style"] === "dot", "mk-dot");
+    cls(so["marker.style"] === "none", "mk-none");
+    cls(so["row.divider"] === "none", "div-none");
+    cls(so["row.divider"] === "all", "div-all");
+    cls(so["ts.show"] === false, "no-ts");
+    cls(so["desc.show"] === false, "no-desc");
+    cls(so["delta.show"] === false, "no-delta");
+    cls(so["baseline.show"] === false, "no-baseline");
+    cls(so["caption.show"] === false, "no-caption");
+    cls(so["best.highlight"] === false, "no-best");
+    cls(so["sum.show"] === false, "no-sum");
+    cls(so["legend.show"] === false, "no-legend");
+    // 标题与图例各自对齐（标题用 text-align，图例用 justify-content）
+    if (so["title.align"]) node.style.setProperty("--chart-title-align", so["title.align"]);
+    if (so["legend.align"]) node.style.setProperty("--chart-align", so["legend.align"]);
+    cls(so["legend.pct"] === false, "no-legendpct");
+    // 二轮规格键
+    pxv("opt.radius", "--opt-radius"); pxv("tbl.font", "--tbl-font"); pxv("steplabel.size", "--stp-label");
+    // 文字角色：同一个组件里不同用途的文字各自成套（时间线：时间 / 事件标题 / 描述）
+    pxv("ts.size", "--tl-ts-size"); pxv("ev.size", "--tl-title-size"); pxv("evdesc.size", "--tl-desc-size");
+    if (so["ts.color"]) set("--tl-ts-color", so["ts.color"]);
+    if (so["ev.weight"]) set("--tl-title-weight", so["ev.weight"]);
+    if (so["ev.color"]) set("--tl-title-color", so["ev.color"]);
+    if (so["evdesc.color"]) set("--tl-desc-color", so["evdesc.color"]);
+    // 表格：表头 / 单元格；指标卡：指标名 / 数值 / 对比说明；要点清单：条目
+    pxv("th.size", "--th-size"); pxv("mlabel.size", "--mlabel-size");
+    pxv("mbase.size", "--mbase-size"); pxv("ol.size", "--ol-size");
+    if (so["th.color"]) set("--th-color", so["th.color"]);
+    if (so["td.color"]) set("--td-color", so["td.color"]);
+    if (so["mlabel.color"]) set("--mlabel-color", so["mlabel.color"]);
+    if (so["mv.weight"]) set("--mv-weight", so["mv.weight"]);
+    if (so["mv.color"]) set("--mv-color", so["mv.color"]);
+    if (so["mbase.color"]) set("--mbase-color", so["mbase.color"]);
+    if (so["ol.color"]) set("--ol-color", so["ol.color"]);
+    pxv("flabel.size", "--flabel-size");
+    if (so["flabel.weight"]) set("--flabel-weight", so["flabel.weight"]);
+    if (so["flabel.color"]) set("--flabel-color", so["flabel.color"]);
+    if (so["tlline.color"]) set("--tl-line-c", so["tlline.color"]);
+    if (so["icon.color"]) set("--cicon-c", so["icon.color"]);
+    cls(so["radio.show"] === false, "no-radio");
+    cls(so["metric.align"] === "center", "metric-center");
+    cls(so["delta.invert"] === true, "delta-invert");
+    cls(so["col.align"] === "left", "col-left");
+    cls(so["stepnum.show"] === false, "no-stepnum");
+    // 此前无消费者的三项，接线到真实渲染
+    cls(so["input.border"] === false, "no-inputborder");
+    cls(so["label.pos"] === "left", "label-left");
+    pxv("row.height", "--row-h");
+    cls(so["text.align"] === "center", "txt-center");
+    // 三轮规格键
+    // 多容器：面板边框 / 选项容器底色与边框 / 提交按钮容器
+    if (so["panel.bc"]) set("--panel-bc", so["panel.bc"]);
+    if (so["opt.bg"]) set("--opt-bg", so["opt.bg"]);
+    if (so["opt.bc"]) set("--opt-bc", so["opt.bc"]);
+    if (so["btn.bg"]) set("--btn-bg", so["btn.bg"]);
+    if (so["btn.bc"]) set("--btn-bc", so["btn.bc"]);
+    if (so["btn.fg"]) set("--btn-fg", so["btn.fg"]);
+    // 选择器 Style 六区细项：全部转成受限 token / class，不接受任意 CSS。
+    pxv("container.width", "--comp-max-w");
+    pxv("module.gap", "--module-gap");
+    pxv("title.size", "--title-size"); pxv("desc.size", "--desc-size");
+    pxv("option.name.size", "--opt-name-size"); pxv("option.desc.size", "--opt-desc-size");
+    pxv("opt.padding.x", "--opt-px"); pxv("radio.size", "--radio-size");
+    pxv("tag.radius", "--tag-radius"); pxv("tag.gap", "--tag-gap");
+    pxv("btn.height", "--btn-height"); pxv("btn.padding.x", "--btn-px");
+    pxv("btn.text.size", "--btn-text-size"); pxv("btn.radius", "--btn-radius");
+    const pctv = (k, cssVar) => { const n = Number(so[k]); if (Number.isFinite(n)) set(cssVar, Math.max(0, Math.min(100, n)) / 100); };
+    pctv("btn.disabled.opacity", "--btn-disabled-opacity");
+    if (so["title.weight"]) set("--title-weight", so["title.weight"]);
+    if (so["title.color"]) set("--title-color", so["title.color"]);
+    if (so["desc.color"]) set("--desc-color", so["desc.color"]);
+    if (so["option.name.weight"]) set("--opt-name-weight", so["option.name.weight"]);
+    if (so["option.name.color"]) set("--opt-name-color", so["option.name.color"]);
+    if (so["option.desc.color"]) set("--opt-desc-color", so["option.desc.color"]);
+    if (so["radio.color"]) set("--radio-color", so["radio.color"]);
+    if (so["state.selected.bg"]) set("--opt-selected-bg", so["state.selected.bg"]);
+    if (so["state.selected.bc"]) set("--opt-selected-bc", so["state.selected.bc"]);
+    if (so["tag.text"]) set("--tag-text", so["tag.text"]);
+    if (so["tag.bg"]) set("--tag-bg", so["tag.bg"]);
+    if (so["btn.text.weight"]) set("--btn-text-weight", so["btn.text.weight"]);
+    if (so["btn.submitted.bg"]) set("--btn-submitted-bg", so["btn.submitted.bg"]);
+    cls(so["panel.border"] === false, "no-panel-border");
+    cls(so["layout.direction"] === "horizontal", "layout-horizontal");
+    cls(so["layout.align"] === "center", "layout-center");
+    cls(so["layout.align"] === "stretch", "layout-stretch");
+    cls(so.density === "compact", "density-compact");
+    cls(so.density === "loose", "density-loose");
+    cls(so["options.layout"] === "grid" && !node.classList.contains("display-inline"), "options-grid");
+    cls(so["options.layout"] === "inline", "options-inline");
+    cls(so["tag.style"] === "solid", "tag-solid");
+    cls(so["tag.style"] === "outline", "tag-outline");
+    cls(so["arrows.show"] === false, "no-arrows");
+    cls(so["steps.dir"] === "vertical", "steps-vert");
+    cls(so["connector.show"] === false, "no-connector");
+    if (so["total.color"]) set("--wf-total", so["total.color"]);
+  }
+
+  function render(envelope, ctx) {
+    try {
+      const fn = RENDERERS[envelope.component_type];
+      if (!fn) throw new Error("unsupported component_type");
+      const node = fn(envelope, ctx);
+      envelope._node = node;
+      applyStyleOverrides(node, envelope.style_overrides, envelope.component_type);
+      // 溯源信息：每个由配置触发的组件都带配置 ID 与版本（后台按此统计），dataset 供埋点与自动化测试定位
+      node.dataset.componentType = envelope.component_type;
+      node.dataset.renderId = envelope.render_id || "";
+      if (envelope.card_ref?.card_id && !ctx.preview) {
+        node.dataset.cardId = envelope.card_ref.card_id;
+        node.dataset.cardVersion = String(envelope.card_ref.version ?? "");
+        node.appendChild(el("div", { class: "comp-meta" }, [
+          el("span", { class: "num", title: "配置 ID（完整）：" + envelope.card_ref.card_id },
+            ["配置 " + String(envelope.card_ref.card_id).slice(0, 8) + " · v" + (envelope.card_ref.version ?? "-")]),
+        ]));
+      }
+      if (!envelope._resetRender) ctx.sendEvent && ctx.sendEvent("card_rendered", envelope, {});
+      envelope._resetRender = false;
+      trackFirstInteraction(node, envelope, ctx);
+      // 层级并入：组件文案（标题）由对话流气泡承载，白卡内只留纯交互内容
+      if (ctx.titleInBubble) node.querySelectorAll(":scope > .comp-title").forEach(t => t.remove());
+      _enhance(node, envelope, ctx);
+      return node;
+    } catch (err) {
+      ctx.sendEvent && ctx.sendEvent("render_degraded", envelope, { reason: String(err) });
+      return el("div", { class: "comp comp-degraded" }, [
+        el("div", { class: "muted" }, ["组件渲染降级为文本"]),
+        el("div", {}, [envelope.degraded_text || "（无内容）"]),
+      ]);
+    }
+  }
+
+  function trackFirstInteraction(node, envelope, ctx) {
+    const renderTs = Date.now();
+    envelope._renderTs = renderTs;
+    let fired = false;
+    node.addEventListener("pointerdown", () => {
+      if (fired || !ctx.sendEvent) return;
+      fired = true;
+      ctx.sendEvent("card_interaction_started", envelope, { time_to_interact_ms: Date.now() - renderTs });
+    }, { capture: true });
+  }
+
+  const CT_LABEL = {
+    "select.single": "列表选择", "select.multi": "列表选择", "select.card": "卡片选择", "scale.likert": "评分",
+    "matrix.compare+select": "对比选择", "form.structured": "信息登记", "input.followup": "备注填写", "slider.range": "数值选择",
+    "picker.datetime": "日期选择", "picker.timerange": "时间段选择", "picker.location": "地址卡片", "rank.priority": "优先级排序", "upload.file": "文件上传", "upload.image": "图片上传", "suggest.followup": "追问引导", "commerce.order": "商品下单", "entry.link": "入口跳转", "guide.steps": "步骤说明书", "track.map": "物流轨迹",
+    "control.confirm": "操作确认",
+  };
+
+  function compCard(children, cls = "") {
+    // brand-scope：品牌 design token 的作用域（导入风格主题只改组件）
+    return el("div", { class: "comp brand-scope " + cls }, children);
+  }
+  function compTitle(text) {
+    return text ? el("div", { class: "comp-title" }, [text]) : null;
+  }
+
+  // ================= 呈现型 =================
+
+  function rText(env) {
+    const p = env.params;
+    const so = env.style_overrides || {};
+    // 结论颜色由配置决定。原来还有个「按语气着色」，靠模型自报 tone 判正负——
+    // 一句话是什么语气没法可靠判定，配出来的颜色也就不可信，整项已去掉。
+    const inkText = so["hl.color"] || "var(--ink-panel, var(--text-primary))";
+    return compCard([
+      p.caption ? el("div", { class: "muted hl-caption" }, [p.caption]) : null,
+      el("div", { class: "hl-value",
+        style: `font-size:var(--hl-size, 1.45em);font-weight:var(--hl-weight, 600);color:${inkText}` },
+        [String(p.value) + (p.unit ? " " + p.unit : "")]),
+    ]);
+  }
+
+  function rMetric(env) {
+    const p = env.params;
+    const deltaStr = p.delta != null ? String(p.delta) : null;
+    const up = deltaStr && !deltaStr.startsWith("-");
+    // 涨跌语义：越高越好（默认）/ 越低越好（如投诉量）/ 中性——颜色表达业务好坏，不只表达数学方向
+    const soM = env.style_overrides || {};
+    const good = soM["delta.good"] || (soM["delta.invert"] ? "lower" : "");
+    const deltaCls = good === "neutral" ? "neutral" : (up === (good !== "lower")) ? "up" : "down";
+    return compCard([
+      el("div", { class: "secondary metric-label" }, [p.label || ""]),
+      el("div", { style: "display:flex;align-items:baseline;gap:10px;margin-top:2px" }, [
+        el("span", { class: "metric-value", style: "font-size:var(--mv-size, var(--font-hero, 30px))" }, [String(p.value)]),
+        p.unit ? el("span", { class: "secondary" }, [p.unit]) : null,
+        deltaStr ? el("span", { class: "delta-chip " + deltaCls, title: up ? "较基线上升" : "较基线下降" }, [
+          UI.icon(up ? "arrowup" : "arrowdown", 11), deltaStr.replace("-", "")]) : null,
+      ]),
+      p.baseline ? el("div", { class: "muted metric-baseline", style: "margin-top:4px" }, [p.baseline]) : null,
+    ]);
+  }
+
+  function rListOrdered(env) {
+    const p = env.params;
+    return compCard([
+      compTitle(p.title),
+      el("div", { class: "ol-list" }, (p.items || []).map((it, i) => el("div", { class: "ol-row" }, [
+        el("span", { class: "ol-marker num" }, [String(i + 1)]),
+        el("span", { class: "ol-dotmark" }),
+        el("span", { class: "ol-text" }, [String(it)]),
+      ]))),
+    ]);
+  }
+
+  // 时间线的时间展示：ISO 值按所选格式渲染；非 ISO 的旧数据原样输出
+  function fmtEventTs(v, mode) {
+    if (!v) return "";
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    const p2 = (n) => String(n).padStart(2, "0");
+    const hm = `${p2(d.getHours())}:${p2(d.getMinutes())}`;
+    if (mode === "date") return `${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+    if (mode === "datetime") return `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${hm}`;
+    if (mode === "relative") {
+      const diff = (Date.now() - d.getTime()) / 1000;
+      const abs = Math.abs(diff), sign = diff >= 0 ? "前" : "后";
+      if (abs < 60) return "刚刚";
+      if (abs < 3600) return `${Math.round(abs / 60)} 分钟${sign}`;
+      if (abs < 86400) return `${Math.round(abs / 3600)} 小时${sign}`;
+      return `${Math.round(abs / 86400)} 天${sign}`;
+    }
+    return hm;
+  }
+
+  function rTimeline(env) {
+    // v2.3 视觉重做：节点圆点 + 竖连线，最新一条主色实心强调
+    const p = env.params;
+    const so = env.style_overrides || {};
+    let evs = p.events || [];
+    // 排序方向可配：desc = 最新在上（物流详情惯例）；强调始终打在最新一条上
+    const desc = so["tl.order"] === "desc";
+    if (desc) evs = [...evs].reverse();
+    const newestIdx = desc ? 0 : evs.length - 1;
+    const emph = so["now.emph"] !== false;
+    return compCard([
+      compTitle(p.title),
+      el("div", { class: "tl-list" }, evs.map((e, i) => el("div", { class: "tl-row" }, [
+        el("div", { class: "tl-ts" }, [fmtEventTs(e.ts, so["ts.format"])]),
+        el("div", { class: "tl-rail" }, [
+          el("span", { class: "tl-dot" + (emph && i === newestIdx ? " now" : "") }),
+          i < evs.length - 1 ? el("span", { class: "tl-line" }) : null,
+        ]),
+        el("div", { class: "tl-body" }, [
+          el("div", { class: "tl-title" + (emph && i === newestIdx ? " now" : "") }, [e.title || ""]),
+          e.desc ? el("div", { class: "muted tl-desc" }, [e.desc]) : null,
+        ]),
+      ]))),
+    ]);
+  }
+
+  function rSteps(env) {
+    // v2.3 视觉重做：真步骤条——圆形节点 + 连线 + 完成/当前/待办三态
+    const p = env.params;
+    const steps = p.steps || [];
+    const cur = Math.min(Math.max(p.current_index || 0, 0), Math.max(steps.length - 1, 0));
+    return compCard([
+      compTitle(p.title),
+      el("div", { class: "steps-row" }, steps.map((s, i) => {
+        const st = i < cur ? "done" : i === cur ? "cur" : "todo";
+        return el("div", { class: "step-cell" }, [
+          el("div", { class: "step-track" }, [
+            el("span", { class: "step-line" + (i === 0 ? " ghost" : i <= cur ? " fill" : "") }),
+            el("span", { class: "step-node " + st }, st === "done" ? [UI.icon("check", 12)] : [String(i + 1)]),
+            el("span", { class: "step-line" + (i === steps.length - 1 ? " ghost" : i < cur ? " fill" : "") }),
+          ]),
+          el("div", { class: "step-label " + st }, [String(s)]),
+        ]);
+      })),
+    ]);
+  }
+
+  function rTable(env) {
+    const p = env.params;
+    const so = env.style_overrides || {};
+    const tblCls = "data" + (so.striped === false ? " no-striped" : "") +
+      (so.header_bold === false ? " hdr-normal" : "") + (so.outline === true ? " tbl-outline" : "");
+    const rows = p.rows || [];
+    // 数字列（含 % / 千分位 / 正负号）自动右对齐 + 等宽数字
+    const numCol = (p.columns || []).map((_, j) =>
+      rows.length > 0 && rows.every(r => /^[-+]?[\d.,]+%?$/.test(String((r || [])[j] ?? "").trim())));
+    return compCard([
+      compTitle(p.title),
+      el("div", { style: "overflow-x:auto" }, [
+        el("table", { class: tblCls }, [
+          el("thead", {}, [el("tr", {}, (p.columns || []).map((c, j) =>
+            el("th", { class: numCol[j] ? "num-col" : "" }, [String(c)])))]),
+          el("tbody", {}, rows.map(r => el("tr", {}, (r || []).map((c, j) =>
+            el("td", { class: numCol[j] ? "num-col" : "" }, [String(c)]))))),
+        ]),
+      ]),
+    ]);
+  }
+
+  function rChartLine(env) {
+    const p = env.params;
+    const box = compCard([compTitle(p.title)]);
+    const chartBox = el("div", {});
+    box.appendChild(chartBox);
+    const so = env.style_overrides || {};
+    requestAnimationFrame(() => UI.lineChart(chartBox, {
+      series: p.series || [], labels: p.categories || p.x_axis || [], unit: p.unit || "",
+      grid: so.grid !== false, gridStyle: so["grid.style"] || "solid",
+      gridCount: Number(so["grid.count"]) || 3, yZero: so["y.zero"] !== false, lastEmph: so["last.emph"] !== false,
+      lineColor: so["line.color"], lineWidth: Number(so["line.width"]) || 2,
+      lineStyle: so["line.style"] || "solid", smooth: so["line.smooth"] === true,
+      pointShow: so["point.show"] !== false, pointShape: so["point.shape"] || "circle",
+      pointSize: Number(so["point.size"]) || 3,
+      areaFill: so["area.fill"] !== false, areaOpacity: (Number(so["area.opacity"]) || 16) / 100,
+      axisShow: so["axis.show"] === true, axisColor: so["axis.color"],
+      valueLabels: so.value_labels === true, legendShow: so["legend.show"] !== false,
+    }));
+    return box;
+  }
+
+  function rChartBar(env) {
+    const p = env.params;
+    const box = compCard([compTitle(p.title)]);
+    const chartBox = el("div", {});
+    box.appendChild(chartBox);
+    const so = env.style_overrides || {};
+    const series0 = (p.series || [])[0] || { values: [] };
+    let cats = [...(p.categories || [])], vals = [...(series0.values || [])];
+    if (so["bar.sort"] === "asc" || so["bar.sort"] === "desc") {
+      const idx = vals.map((v, i) => i).sort((a, b2) => so["bar.sort"] === "asc" ? vals[a] - vals[b2] : vals[b2] - vals[a]);
+      cats = idx.map(i => cats[i]); vals = idx.map(i => vals[i]);
+    }
+    requestAnimationFrame(() => UI.barChart(chartBox, {
+      categories: cats, values: vals, unit: p.unit || "",
+      horizontal: so["bar.horizontal"] === true,
+      color: so["bar.color"], grid: so.grid !== false, gridStyle: so["grid.style"] || "solid",
+      valueLabels: so.value_labels !== false,
+      barWidthPct: (Number(so["bar.width"]) || 55) / 100, barRadius: so["bar.radius"] != null ? Number(so["bar.radius"]) : 4,
+      axisColor: so["axis.color"],
+    }));
+    return box;
+  }
+
+  function rChartPie(env) {
+    const p = env.params;
+    const so = env.style_overrides || {};
+    let slices = (p.slices || []).slice(0, 7).map(s => ({ ...s, value: Math.max(0, Number(s.value) || 0) }));
+    // 默认开启：未设置时按占比排序，关掉才保持原始顺序（=== true 会让默认值永远落不到实处）
+    if (so["pie.sort"] !== false) slices = [...slices].sort((a, b2) => b2.value - a.value);
+    const total = slices.reduce((s, x) => s + x.value, 0) || 1;
+    const pal = (window.Brand ? Brand.chartPalette() : {}).categorical
+      || ["#3E63DD", "#0FA3A3", "#8E4EC6", "#EE7712", "#D6409F"];
+    const legend = el("div", { class: "pie-legend" },
+      slices.map((s, i) => el("span", { class: "pie-lg" }, [
+        el("span", { class: "pie-dot", style: `background:${pal[i % pal.length]}` }),
+        el("span", { class: "pie-lb" }, [s.label]),
+        el("span", { class: "pie-pct num" }, [`${(s.value / total * 100).toFixed(0)}%`]),
+      ])));
+    if (so["pie.style"] !== "bar") {
+      // 默认是语义一致的实心饼图；donut 时改为圆环。
+      const R = 52, C = 2 * Math.PI * R;
+      const svg = el("div", { style: "display:flex;justify-content:center" });
+      const sv = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      sv.setAttribute("viewBox", "0 0 140 140"); sv.setAttribute("width", "150");
+      sv.setAttribute("role", "img");
+      sv.setAttribute("aria-label", slices.map(s => `${s.label} ${(s.value / total * 100).toFixed(0)}%`).join("，"));
+      let acc = 0;
+      slices.forEach((s, i) => {
+        const frac = s.value / total;
+        if (frac <= 0) return;
+        let shape;
+        if (so["pie.style"] === "donut") {
+          shape = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          shape.setAttribute("cx", "70"); shape.setAttribute("cy", "70"); shape.setAttribute("r", String(R));
+          shape.setAttribute("fill", "none"); shape.setAttribute("stroke", pal[i % pal.length]);
+          shape.setAttribute("stroke-width", String(Number(so["donut.thickness"]) || 20));
+          shape.setAttribute("stroke-dasharray", `${Math.max(0, frac * C - 2)} ${C}`);
+          shape.setAttribute("stroke-dashoffset", String(-acc * C));
+          shape.setAttribute("transform", "rotate(-90 70 70)");
+        } else if (frac >= 0.999999) {
+          shape = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          shape.setAttribute("cx", "70"); shape.setAttribute("cy", "70"); shape.setAttribute("r", "58");
+          shape.setAttribute("fill", pal[i % pal.length]);
+        } else {
+          const a0 = acc * Math.PI * 2 - Math.PI / 2;
+          const a1 = (acc + frac) * Math.PI * 2 - Math.PI / 2;
+          const x0 = 70 + 58 * Math.cos(a0), y0 = 70 + 58 * Math.sin(a0);
+          const x1 = 70 + 58 * Math.cos(a1), y1 = 70 + 58 * Math.sin(a1);
+          shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          shape.setAttribute("d", `M 70 70 L ${x0} ${y0} A 58 58 0 ${frac > 0.5 ? 1 : 0} 1 ${x1} ${y1} Z`);
+          shape.setAttribute("fill", pal[i % pal.length]);
+        }
+        const t = document.createElementNS("http://www.w3.org/2000/svg", "title");
+        t.textContent = `${s.label}: ${(frac * 100).toFixed(1)}%`;
+        shape.appendChild(t);
+        sv.appendChild(shape);
+        acc += frac;
+      });
+      svg.appendChild(sv);
+      return compCard([compTitle(p.title), svg, legend]);
+    }
+    return compCard([
+      compTitle(p.title),
+      el("div", { style: "display:flex;height:var(--pie-h, 18px);border-radius:6px;overflow:hidden;gap:2px" },
+        slices.map((s, i) => el("div", {
+          style: `width:${(s.value / total * 100)}%;background:${pal[i % pal.length]}`,
+          title: `${s.label}: ${(s.value / total * 100).toFixed(1)}%`,
+        }))),
+      legend,
+    ]);
+  }
+
+  function matrixTable(p, interactive, onPick, picked, so2) {
+    // 表格对比工具：整行可点选择；紧凑列宽 + 单元格省略，窄容器不再乱换行
+    // 综合列默认关闭（属性对比模式）：各维度直加只有在同向同量纲时才成立，需显式开启
+    const showSum = (so2 || {})["sum.show"] === true;
+    const striped = (so2 || {}).striped === true;   // 对比表默认不加斑马纹，开了才有
+    const dims = p.dimensions || [];
+    const head = el("tr", {}, [
+      el("th", { class: "mx-name" }, ["方案"]),
+      ...dims.map(d => el("th", { class: "mx-v", title: d }, [d])),
+      showSum ? el("th", { class: "mx-sum" }, ["综合"]) : null,
+    ]);
+    const sums = (p.options || []).map((_, i) => (p.values[i] || []).reduce((a2, b2) => a2 + (Number(b2) || 0), 0));
+    const best = Math.max(...sums, 0);
+    const rows = (p.options || []).map((opt, i) => {
+      const vals = p.values[i] || [];
+      const isRec = p.recommended_default === opt || p.recommended === opt;
+      const isOn = picked === opt;
+      return el("tr", {
+        class: "mx-row" + (isOn ? " on" : "") + (interactive ? " pick" : ""),
+        ...(interactive ? { onclick: () => onPick(opt), role: "radio", "aria-checked": isOn ? "true" : "false", tabindex: "0",
+          onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(opt); } } } : {}),
+      }, [
+        el("td", { class: "mx-name" }, [
+          interactive ? selDot(isOn, false) : null,
+          el("span", { class: "mx-opt", title: opt }, [opt]),
+          isRec ? el("span", { class: "chip blue", style: "flex:none" }, ["推荐"]) : null,
+        ]),
+        ...dims.map((d, j) => el("td", { class: "mx-v num" }, [vals[j] == null ? "-" : String(vals[j])])),
+        showSum ? el("td", { class: "mx-sum num" + (sums[i] === best && best > 0 ? " best" : "") }, [sums[i] ? sums[i].toFixed(1) : "-"]) : null,
+      ]);
+    });
+    return el("table", { class: "data mx-table" + (striped ? " mx-striped" : "") },
+      [el("thead", {}, [head]), el("tbody", {}, rows)]);
+  }
+
+  function rMatrixCompare(env) {
+    return compCard([compTitle(env.params.title || "方案对比"), matrixTable(env.params, false, null, null, env.style_overrides)]);
+  }
+
+  function rFlowReasoning(env) {
+    const p = env.params;
+    return compCard([
+      compTitle(p.title || "执行过程"),
+      el("div", {}, (p.nodes || []).map(n =>
+        el("div", { style: "display:flex;gap:10px;padding:4px 0" }, [
+          el("span", { class: "chip " + (n.status === "done" ? "green" : n.status === "active" ? "blue" : "gray") },
+            [n.label || n.id]),
+          n.desc ? el("span", { class: "secondary" }, [n.desc]) : null,
+        ]))),
+    ]);
+  }
+
+  function rCitation(env) {
+    const p = env.params;
+    return compCard([
+      el("div", { style: "font-weight: 600;margin-bottom:8px" }, [p.claim || ""]),
+      ...(p.sources || []).map(s => el("div", {
+        style: "border-left:3px solid var(--primary);padding:6px 10px;margin:6px 0;background:var(--bg-page);border-radius:0 var(--radius-control) var(--radius-control) 0",
+      }, [
+        el("div", { style: "display:flex;justify-content:space-between;gap:8px" }, [
+          el("a", { href: s.url || "#", onclick: (e) => e.preventDefault(), style: "font-weight: 600" }, [s.title || "来源"]),
+          s.confidence != null ? el("span", { class: "chip gray" }, ["置信 " + Math.round(s.confidence * 100) + "%"]) : null,
+        ]),
+        s.snippet ? el("div", { class: "muted" }, [s.snippet]) : null,
+      ])),
+    ], "comp-citation");
+  }
+
+  // ================= 采集型 =================
+
+  // 按钮样式直接落到真实提交按钮，避免外层继承在富选择器、状态样式中被通用按钮规则盖掉。
+  function applySubmitButtonStyle(btn, overrides) {
+    const so = overrides || {};
+    const set = (name, value) => { if (value !== undefined && value !== null && value !== "") btn.style.setProperty(name, String(value)); };
+    const px = (key, name) => { const value = Number(so[key]); if (Number.isFinite(value)) set(name, value + "px"); };
+    px("btn.height", "--btn-height");
+    px("btn.padding.x", "--btn-px");
+    px("btn.text.size", "--btn-text-size");
+    px("btn.radius", "--btn-radius");
+    set("--btn-bg", so["btn.bg"]);
+    set("--btn-bc", so["btn.bc"]);
+    set("--btn-fg", so["btn.fg"]);
+    set("--btn-text-weight", so["btn.text.weight"]);
+    set("--btn-submitted-bg", so["btn.submitted.bg"]);
+    const disabledOpacity = Number(so["btn.disabled.opacity"]);
+    if (Number.isFinite(disabledOpacity)) set("--btn-disabled-opacity", Math.max(0, Math.min(100, disabledOpacity)) / 100);
+  }
+
+  function submitBar(env, ctx, getPayload, validate) {
+    const bar = el("div", { class: "submit-bar" });
+    const label = el("span", { class: "submit-label" }, [env.params.submit_label || "提交"]);
+    const feedback = env.params.submit_feedback
+      ? el("span", { class: "submit-feedback", role: "status", "aria-live": "polite", hidden: "" }, [
+          UI.icon("check", 14), el("span", {}, [env.params.submit_feedback]),
+        ])
+      : null;
+    const btn = el("button", {
+      class: "btn primary", onclick: () => {
+        const err = validate && validate();
+        if (err) { UI.toast(err, true); return; }
+        const payload = getPayload();
+        env._submitted = true;
+        // 提交即终态：冻结组件内全部交互控件，避免"已提交但还能改"的状态错觉
+        const root = btn.closest(".comp");
+        if (root) root.querySelectorAll("button, input, textarea, select").forEach(n => n.disabled = true);
+        btn.textContent = "提交中…";
+        btn.classList.add("submitting");
+        setTimeout(() => {
+          btn.classList.remove("submitting");
+          btn.classList.add("submitted");
+          btn.textContent = env.params.submitted_label || "已提交";
+          if (feedback) feedback.hidden = false;
+        }, 420);
+        ctx.onCollectSubmit(payload, env);
+        // 群体回显开关：提交完成后显示其他人的选择情况
+        if (env.params.echo_results && env.card_ref?.card_id) {
+          showEcho(env, bar, payload.user_selection);
+        }
+      },
+    }, [label]);
+    applySubmitButtonStyle(btn, env.style_overrides);
+    bar.appendChild(btn);
+    if (feedback) bar.appendChild(feedback);
+    return bar;
+  }
+
+  // 回显：提交后展示群体分布。单面板：一句结论 + 细分布条，自己的选择用主色标出
+  async function showEcho(env, container, ownSelection) {
+    const box = el("div", { class: "echo-panel" }, [el("div", { class: "muted" }, ["正在汇总大家的回答……"])]);
+    // 设计系统：回显是独立区块，插在提交栏上方；按钮行保持在底部（已提交禁用态）
+    if (container.parentNode) container.parentNode.insertBefore(box, container);
+    else container.appendChild(box);
+    await new Promise(r => setTimeout(r, 700)); // 等自己的提交事件先入库
+    let d;
+    try {
+      d = await UI.api(`/v1/cards/${env.card_ref.card_id}/responses`);
+    } catch (e) {
+      // 回显被关闭（服务端 403）→ 静默收起，不打扰用户
+      if (e.status === 403) { box.remove(); return; }
+      box.innerHTML = "";
+      box.appendChild(el("div", { class: "muted" }, ["暂时看不到大家的回答，稍后可在看板查看"]));
+      return;
+    }
+    try {
+      box.innerHTML = "";
+      const own = Array.isArray(ownSelection) ? ownSelection.map(String) : [String(ownSelection)];
+      const dist = { ...d.distribution };
+      const serverHasOwn = d.total_submissions > 0 && own.every(o => (dist[o] || 0) > 0);
+      if (!serverHasOwn) own.forEach(o => { if (o !== "null" && o !== "undefined") dist[o] = (dist[o] || 0) + 1; });
+      const entries = Object.entries(dist).sort((a, b) => b[1] - a[1]);
+      const total = entries.reduce((s, [, n]) => s + n, 0) || 1;
+      const ownCount = own.reduce((s, o) => s + (dist[o] || 0), 0);
+      const ownPct = Math.round(ownCount / total * 100);
+      const people = Math.max(d.respondents, 1);
+      let headline;
+      if (total <= 1) headline = "你是第一个回答的人";
+      else if (ownCount <= 1) headline = `${people} 人回答 · 你的选择比较独特`;
+      else headline = `${people} 人回答 · ${ownPct}% 和你选了一样`;
+      box.appendChild(el("div", { class: "echo-head" }, [headline]));
+      const ownValues = own.filter(o => o !== "null" && o !== "undefined" && o.trim());
+      if (ownValues.length) {
+        box.appendChild(el("div", { class: "echo-own-summary" }, [
+          el("span", { class: "echo-own-label" }, ["你的选择"]),
+          el("span", { class: "echo-own-values" }, ownValues.map(o =>
+            el("span", { class: "echo-own-chip" }, [UI.icon("check", 12), o]))),
+        ]));
+      }
+      // 优先把比例画进选项本身：选项下方一条占比线 + 百分比，不再另起一块把选项重列一遍
+      const host = container.closest ? (container.closest(".comp") || container.parentNode) : container.parentNode;
+      const cells = host ? [...host.querySelectorAll("[data-opt]")] : [];
+      const inline = cells.length > 0;
+      if (inline) {
+        cells.forEach(cell => {
+          const opt = cell.getAttribute("data-opt");
+          const n = dist[opt] || 0;
+          const pct = Math.round(n / total * 100);
+          cell.classList.add("has-echo");
+          if (own.includes(opt)) cell.classList.add("echo-own");
+          cell.querySelectorAll(":scope > .opt-echo").forEach(x => x.remove());
+          cell.appendChild(el("span", { class: "opt-echo", title: `${n} 人选了这项` }, [
+            el("span", { class: "oe-track" }, [el("span", { class: "oe-fill", style: `width:${pct}%` })]),
+            el("span", { class: "oe-pct num" }, [pct + "%"]),
+          ]));
+        });
+        // 分布里有、但选项列表里没有的（自由填写等），仍在面板里补一行
+        entries.filter(([opt]) => !cells.some(c => c.getAttribute("data-opt") === opt))
+          .forEach(([opt, n]) => box.appendChild(el("div", { class: "echo-row" + (own.includes(opt) ? " own" : "") }, [
+            el("span", { class: "echo-name", title: opt }, [opt]),
+            el("span", { class: "echo-track" }, [el("span", { class: "echo-fill", style: `width:${Math.max(3, n / total * 100)}%` })]),
+            el("span", { class: "echo-pct num" }, [`${Math.round(n / total * 100)}%`]),
+          ])));
+      } else {
+        entries.forEach(([opt, n]) => {
+          const isOwn = own.includes(opt);
+          box.appendChild(el("div", { class: "echo-row" + (isOwn ? " own" : "") }, [
+            el("span", { class: "echo-name", title: opt }, [opt, isOwn ? UI.icon("check", 12) : null]),
+            el("span", { class: "echo-track" }, [el("span", { class: "echo-fill", style: `width:${Math.max(3, n / total * 100)}%` })]),
+            el("span", { class: "echo-pct num" }, [`${Math.round(n / total * 100)}%`]),
+          ]));
+        });
+      }
+      if (!entries.length && d.recent_texts?.length) {
+        box.appendChild(el("div", { class: "echo-head" }, [`${people} 人回答 · 大家这样说`]));
+        d.recent_texts.slice(0, 3).forEach(t2 => box.appendChild(el("div", { class: "echo-quote" }, [t2])));
+      }
+      if (!entries.length && !d.recent_texts?.length) {
+        box.appendChild(el("div", { class: "muted" }, ["你是第一个回答的人"]));
+      }
+    } catch (e) {
+      box.innerHTML = "";
+      box.appendChild(el("div", { class: "muted" }, ["暂时看不到大家的回答，稍后可在看板查看"]));
+    }
+  }
+
+  function emptyState(env) {
+    return env.params.empty_state
+      ? el("div", { class: "empty-state", style: "padding:16px" }, [env.params.empty_state]) : null;
+  }
+
+  // ---------- 采集组件显示样式变体（params.display，默认取各自第一种） ----------
+  function selDot(on, multi) {
+    return el("span", { class: "sel-dot" + (on ? " on" : "") + (multi ? " sq" : "") }, on ? [UI.icon("check", 12)] : []);
+  }
+
+  // 卡片展现的图片位始终保留：未配图或图片加载失败时显示空白占位，避免文案左右跳动。
+  function cardOptionMedia(meta, name) {
+    const blank = () => el("span", { class: "card-image-placeholder", "aria-hidden": "true" });
+    const shell = el("span", { class: "card-image-shell" }, [blank()]);
+    if (meta && meta.image) {
+      const img = el("img", { src: meta.image, alt: name });
+      img.onerror = () => shell.replaceChildren(blank());
+      shell.replaceChildren(img);
+    }
+    return shell;
+  }
+
+  function cardChoiceMark(on, multi) {
+    return el("span", { class: "card-choice-mark" + (on ? " on" : "") + (multi ? " multi" : ""), "aria-hidden": "true" },
+      on ? [UI.icon("check", 13)] : []);
+  }
+
+  function setCardChoiceState(node, on, multi) {
+    node.classList.toggle("on", on);
+    node.setAttribute("aria-checked", on ? "true" : "false");
+    const mark = node.querySelector(".card-choice-mark");
+    if (mark) mark.replaceWith(cardChoiceMark(on, multi));
+  }
+
+  function cardSelectionSummary(value, multi) {
+    const values = multi ? [...(value || [])] : (value ? [value] : []);
+    return el("div", { class: "card-selection-summary", ...(values.length ? {} : { hidden: "" }) }, [
+      el("span", { class: "card-selection-icon" }, [UI.icon("check", 14)]),
+      el("span", { class: "card-selection-label" }, ["已选择："]),
+      el("strong", { class: "card-selection-value" }, [values.join("、")]),
+    ]);
+  }
+
+  function updateCardSelectionSummary(node, value, multi) {
+    const values = multi ? [...(value || [])] : (value ? [value] : []);
+    node.hidden = !values.length;
+    const valueNode = node.querySelector(".card-selection-value");
+    if (valueNode) valueNode.textContent = values.join("、");
+  }
+
+  function cardOptionNode(name, meta, badge, on, multi) {
+    return el("div", { class: "opt-card media" + (on ? " on" : ""), role: multi ? "checkbox" : "radio",
+      "aria-checked": on ? "true" : "false", "data-opt": String(name), tabindex: "0" }, [
+      cardOptionMedia(meta, name),
+      el("span", { class: "oc-copy" }, [
+        el("span", { class: "oc-name" }, [name]),
+        meta && meta.desc ? el("span", { class: "oc-desc" }, [meta.desc]) : null,
+        badge ? el("span", { class: "rec-chip chip " + ((meta && meta.badge_tone) || "blue") }, [badge]) : null,
+      ]),
+      cardChoiceMark(on, multi),
+    ]);
+  }
+
+  function optionList(opts, p, multi, getPicked, setPicked) {
+    const rows = opts.map(o => {
+      // 0913Mia调整：选项列表只反映用户当前选择，不再读取默认选中配置
+      const m = (p.option_meta || {})[o] || {};
+      const on = multi ? getPicked().has(o) : getPicked() === o;
+      // 标签文字由配置者填；没填就不显示，不再因为「是推荐项」自动补一个「推荐」
+        const badge = m.badge || "";
+      const row = el("button", { class: "opt-item" + (on ? " on" : ""), type: "button", role: multi ? "checkbox" : "radio",
+        "aria-checked": on ? "true" : "false", "data-opt": String(o) }, [
+        selDot(on, multi),
+        el("span", { class: "opt-copy opt-text" }, [
+          el("span", { class: "opt-title" }, [o,
+            badge ? el("span", { class: "opt-badge rec-chip " + (m.badge_tone || "blue") }, [badge]) : null]),
+          m.desc ? el("span", { class: "opt-desc" }, [m.desc]) : null,
+        ]),
+      ]);
+      row._opt = o;
+      row.onclick = () => {
+        setPicked(o);
+        rows.forEach(r => {
+          const on = multi ? getPicked().has(r._opt) : getPicked() === r._opt;
+          r.classList.toggle("on", on);
+          r.setAttribute("aria-checked", on ? "true" : "false");
+          r.replaceChild(selDot(on, multi), r.firstChild);
+        });
+      };
+      return row;
+    });
+    return el("div", { class: "opt-list", role: multi ? "group" : "radiogroup" }, rows);
+  }
+
+  function rSelectSingle(env, ctx) {
+    const p = env.params;
+    // 多选是选择器的一个开关，不是另一个组件
+    if (p.multi === true) return rSelectMulti(env, ctx);
+    const opts = p.options || [];
+    if (!opts.length) return compCard([compTitle(p.prompt), emptyState(env)]);
+    // 呈现方式是选择器的可配项（列表 / 卡片）；没传就按组件类型给默认值
+    const display = p.display || (env.component_type === "select.card" ? "card" : "list");
+    // 0913Mia调整：单选不再默认选中，始终由用户主动选择
+    let picked = p.preview_selected_default && opts.includes(p.recommended_default) ? p.recommended_default : null;
+    let body;
+    if (display === "inline" || display === "composer") {
+      const btns = opts.map(o => el("button", {
+        class: "btn opt" + (picked === o ? " primary" : ""), type: "button", role: "radio", "aria-checked": picked === o ? "true" : "false",
+        onclick: () => { picked = o;
+          btns.forEach(b => { const on = b.getAttribute("data-opt") === picked; b.classList.toggle("primary", on); b.setAttribute("aria-checked", on ? "true" : "false"); }); },
+        "data-opt": String(o),
+      }, [o, ((p.option_meta || {})[o] || {}).badge
+            ? el("span", { class: "rec-chip chip blue" }, [((p.option_meta || {})[o] || {}).badge]) : null]));
+      body = el("div", { class: display === "composer" ? "quick-float" : "opt-row" }, btns);
+    } else if (display === "card") {
+      const meta = p.option_meta || {};
+      const summary = cardSelectionSummary(picked, false);
+      const cards = opts.map(o => {
+        const m = meta[o] || {};
+        // 标签文字由配置者填；没填就不显示，不再因为「是推荐项」自动补一个「推荐」
+        const badge = m.badge || "";
+        const node = cardOptionNode(o, m, badge, picked === o, false);
+        node.onclick = () => {
+          picked = o;
+          cards.forEach(c => setCardChoiceState(c, c === node, false));
+          updateCardSelectionSummary(summary, picked, false);
+        };
+        node.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); node.click(); } };
+        return node;
+      });
+      body = el("div", { class: "card-choice-body" }, [
+        el("div", { class: "opt-row card-options" }, cards),
+        summary,
+      ]);   // 间距交给 --cand-gap，内联样式会盖掉配置
+    } else {
+      body = optionList(opts, p, false, () => picked, (o) => picked = o);
+    }
+    const cardEl = compCard([
+      compTitle(p.prompt),
+      p.description ? el("div", { class: "comp-subtitle" }, [p.description]) : null,
+      body,
+      submitBar(env, ctx, () => ({
+        options_offered: opts, recommended_default: p.recommended_default || null,
+        user_selection: picked, modified_from_default: picked !== p.recommended_default,
+      }), () => picked == null ? "请先选择一项" : null),
+    ]);
+    cardEl.classList.add("display-" + (display === "composer" ? "inline" : display));
+    if (p.preview_rich || Object.values(p.option_meta || {}).some(m => m && (m.desc || m.badge))) cardEl.classList.add("rich-select");
+    // 0913Mia调整：选择器必须由用户点击提交按钮确认，不再支持选择即提交
+    return cardEl;
+  }
+
+  function rSelectMulti(env, ctx) {
+    const p = env.params;
+    if (p.multi === false) return rSelectSingle(env, ctx);
+    const opts = p.options || [];
+    if (!opts.length) return compCard([compTitle(p.prompt), emptyState(env)]);
+    // 多选是交互行为，不改变呈现方式；呈现方式按配置走，没配就用类型默认值
+    const display = p.display || (env.component_type === "select.card" ? "card" : "list");
+    // 0913Mia调整：多选不再读取默认值和取消限制，保留最少选择数
+    const picked = new Set();
+    const minSel = Number(p.min_select) > 0 ? Number(p.min_select) : 1;
+    const maxSel = Number(p.max_select) > 0 ? Number(p.max_select) : 0;
+    const canAdd = () => !maxSel || picked.size < maxSel;
+    const limitTip = () => { if (maxSel) UI.toast(`最多可选 ${maxSel} 项`, true); };
+    let body;
+    if (display === "inline" || display === "composer") {
+      body = el("div", { class: display === "composer" ? "quick-float" : "opt-row" }, opts.map(o => el("button", {
+        class: "btn opt" + (picked.has(o) ? " primary" : ""), type: "button", role: "checkbox", "aria-checked": picked.has(o) ? "true" : "false",
+        "data-opt": String(o),
+        onclick: (e) => {
+          if (picked.has(o)) { picked.delete(o); e.currentTarget.classList.remove("primary"); e.currentTarget.setAttribute("aria-checked", "false"); }
+          else if (canAdd()) { picked.add(o); e.currentTarget.classList.add("primary"); e.currentTarget.setAttribute("aria-checked", "true"); }
+          else limitTip();
+        },
+      }, [o])));
+    } else if (display === "card") {
+      const meta = p.option_meta || {};
+      const summary = cardSelectionSummary(picked, true);
+      const cards = opts.map(o => {
+        const m = meta[o] || {};
+        // 标签文字由配置者填；没填就不显示，不再因为「是推荐项」自动补一个「推荐」
+        const badge = m.badge || "";
+        const node = cardOptionNode(o, m, badge, picked.has(o), true);
+        node.onclick = () => {
+          if (!picked.has(o) && !canAdd()) { limitTip(); return; }
+          picked.has(o) ? picked.delete(o) : picked.add(o);
+          const on = picked.has(o);
+          setCardChoiceState(node, on, true);
+          updateCardSelectionSummary(summary, picked, true);
+        };
+        node.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); node.click(); } };
+        return node;
+      });
+      body = el("div", { class: "card-choice-body" }, [
+        el("div", { class: "opt-row card-options" }, cards),
+        summary,
+      ]);   // 间距交给 --cand-gap，内联样式会盖掉配置
+    } else {
+      body = optionList(opts, p, true, () => picked, (o) => {
+        if (!picked.has(o) && !canAdd()) { limitTip(); return; }
+        picked.has(o) ? picked.delete(o) : picked.add(o);
+      });
+    }
+    const cardEl = compCard([
+      compTitle(p.prompt),
+      p.description ? el("div", { class: "comp-subtitle" }, [p.description]) : null,
+      (minSel || maxSel) ? el("div", { class: "muted", style: "font-size:var(--font-caption)" }, [
+        minSel && maxSel ? `请选择 ${minSel}-${maxSel} 项` : minSel ? `至少选择 ${minSel} 项` : `最多可选 ${maxSel} 项`,
+      ]) : null,
+      body,
+      submitBar(env, ctx, () => ({
+        options_offered: opts, user_selection: [...picked],
+      }), () => picked.size < minSel ? `请至少选择 ${minSel} 项` : null),
+    ]);
+    cardEl.classList.add("display-" + (display === "composer" ? "inline" : display));
+    if (p.preview_rich || Object.values(p.option_meta || {}).some(m => m && (m.desc || m.badge))) cardEl.classList.add("rich-select");
+    return cardEl;
+  }
+
+  function rSelectCard(env, ctx) {
+    const p = env.params;
+    const opts = p.options || [];
+    if (!opts.length) return compCard([compTitle(p.prompt), emptyState(env)]);
+    const names = opts.map(o => typeof o === "object" ? o.label : o);
+    const normalizedMeta = { ...(p.option_meta || {}) };
+    opts.forEach(o => {
+      if (!o || typeof o !== "object" || !o.label) return;
+      normalizedMeta[o.label] = { ...(o.desc ? { desc: o.desc } : {}), ...(o.image ? { image: o.image } : {}),
+        ...(normalizedMeta[o.label] || {}) };
+    });
+    const normalizedEnv = { ...env, params: { ...p, options: names, option_meta: normalizedMeta } };
+    // 卡片选择器复用已补齐的单 / 多选交互，但展示结构永远是卡片。
+    // 因此同时获得：标题描述、推荐标签、预览默认选中、已选择反馈和富内容态。
+    if (p.multi === true) return rSelectMulti(normalizedEnv, ctx);
+    return rSelectSingle(normalizedEnv, ctx);
+  }
+
+  function rSlider(env, ctx) {
+    const p = env.params;
+    const min = p.min ?? 0, max = p.max ?? 100;
+    const configuredStep = Number(p.step);
+    const step = Number.isFinite(configuredStep) && configuredStep > 0 ? configuredStep : 1;
+    const rawInit = p.default ?? p.recommended_default ?? (min + max) / 2;
+    const init = Math.min(max, Math.max(min, rawInit));
+    const display = (env.style_overrides || {})["sl.style"] || p.display || "slider";
+    let getVal;
+    let body;
+    if (display === "stepper") {
+      let v = init;
+      const valEl = el("span", { class: "val" }, [String(v) + (p.unit ? " " + p.unit : "")]);
+      const draw = () => valEl.textContent = String(v) + (p.unit ? " " + p.unit : "");
+      body = el("div", { class: "stepper" }, [
+        el("button", { class: "btn", type: "button", "aria-label": "减少", onclick: () => { v = Math.max(min, v - step); draw(); } }, ["-"]),
+        valEl,
+        el("button", { class: "btn", type: "button", "aria-label": "增加", onclick: () => { v = Math.min(max, v + step); draw(); } }, ["+"]),
+        el("span", { class: "muted" }, [`${min} ~ ${max}`]),
+      ]);
+      getVal = () => v;
+    } else if (display === "input") {
+      const num = el("input", { type: "number", min, max, step, value: init, style: "max-width:140px" });
+      body = el("div", { style: "display:flex;align-items:center;gap:8px" }, [
+        num, p.unit ? el("span", { class: "muted" }, [p.unit]) : null,
+        el("span", { class: "muted" }, [`范围 ${min} ~ ${max}`]),
+      ]);
+      getVal = () => Math.min(max, Math.max(min, Number(num.value) || min));
+    } else {
+      const val = el("span", { style: "font-weight:600;font-variant-numeric:tabular-nums" }, [String(init)]);
+      const slider = el("input", { type: "range", min, max, step, value: init, style: "width:100%" });
+      const setFill = () => slider.style.setProperty("--fill", ((Number(slider.value) - min) / (max - min || 1) * 100) + "%");
+      setFill();
+      slider.oninput = () => { val.textContent = slider.value; setFill(); };
+      // 数值和单位是一个整体，不能被挤成两行（「万元」拆成「万 / 元」）
+      body = el("div", { style: "display:flex;align-items:center;gap:12px" }, [slider,
+        el("span", { style: "flex:none;white-space:nowrap;display:inline-flex;align-items:baseline;gap:3px" },
+          [val, p.unit ? el("span", { class: "muted" }, [p.unit]) : null])]);
+      getVal = () => Number(slider.value);
+    }
+    return compCard([
+      compTitle(p.prompt),
+      body,
+      submitBar(env, ctx, () => ({
+        recommended_default: p.recommended_default ?? null, user_selection: getVal(),
+        modified_from_default: getVal() !== p.recommended_default,
+      })),
+    ]);
+  }
+
+  function rForm(env, ctx) {
+    const p = env.params;
+    const fields = p.fields || [];
+    const display = p.display || "stacked";
+    const controls = {};
+    const errBoxes = {};
+    const fieldNodes = fields.map((f, fieldIndex) => {
+      const type = ["select", "radio", "checkbox"].includes(f.type) ? f.type : f.type || "text";
+      const defaultValue = f.default_value ?? f.default ?? "";
+      const options = Array.isArray(f.options) ? f.options.map(String) : [];
+      let control;
+      let getValue;
+      if (type === "select") {
+        control = el("select", {}, [
+          el("option", { value: "" }, [f.placeholder || "请选择"]),
+          ...options.map(option => el("option", { value: option, ...(String(defaultValue) === option ? { selected: "" } : {}) }, [option])),
+        ]);
+        getValue = () => control.value;
+      } else if (type === "radio" || type === "checkbox") {
+        const selected = new Set(Array.isArray(defaultValue) ? defaultValue.map(String)
+          : String(defaultValue || "").split(/[，,]/).map(x => x.trim()).filter(Boolean));
+        const choiceInputs = options.map((option, optionIndex) => el("input", {
+          type, name: type === "radio" ? `form_${env.render_id || "field"}_${fieldIndex}` : undefined,
+          value: option, ...(selected.has(option) ? { checked: "" } : {}), id: `form_${env.render_id || "field"}_${fieldIndex}_${optionIndex}`,
+        }));
+        control = el("div", { class: "form-choice-group " + (type === "checkbox" ? "is-multi" : "is-single") },
+          choiceInputs.map((input, optionIndex) => el("label", { class: "form-choice" }, [input, el("span", {}, [options[optionIndex]])])));
+        getValue = () => type === "checkbox"
+          ? choiceInputs.filter(input => input.checked).map(input => input.value)
+          : (choiceInputs.find(input => input.checked)?.value || "");
+      } else {
+        control = (type === "textarea" || f.multiline)
+          ? el("textarea", { rows: 3, placeholder: f.placeholder || "" })
+          : el("input", { type: type === "number" ? "number" : type === "date" ? "date"
+                : f.format === "phone" ? "tel" : f.format === "email" ? "email" : "text",
+              ...(f.format === "phone" ? { inputmode: "tel" } : {}), placeholder: f.placeholder || "" });
+        control.value = String(defaultValue ?? "");
+        getValue = () => control.value.trim();
+      }
+      // 多选字段的选择数量上下界
+      const selMin = Number(f.min_select), selMax = Number(f.max_select);
+      const hasMin = Number.isFinite(selMin) && selMin > 0;
+      const hasMax = Number.isFinite(selMax) && selMax > 0;
+      const boundHint = type !== "checkbox" ? "" : hasMin && hasMax
+        ? (selMin === selMax ? `请选择 ${selMin} 项` : `请选择 ${selMin}–${selMax} 项`)
+        : hasMin ? `至少选择 ${selMin} 项` : hasMax ? `最多选择 ${selMax} 项` : "";
+      controls[f.key] = { node: control, getValue, min: hasMin ? selMin : 0, max: hasMax ? selMax : 0 };
+      const errBox = el("div", { class: "field-error" });
+      errBoxes[f.key] = errBox;
+      return el("div", { class: "field form-structured-field" }, [
+        el("span", { class: "label-text" + (f.required ? " req" : "") }, [f.label]),
+        f.description ? el("span", { class: "form-field-description" }, [f.description]) : null,
+        boundHint ? el("span", { class: "form-field-description" }, [boundHint]) : null,
+        control, errBox,
+      ]);
+    });
+    return compCard([
+      compTitle(p.prompt),
+      p.description ? el("div", { class: "comp-subtitle" }, [p.description]) : null,
+      display === "compact" ? el("div", { class: "form-grid" }, fieldNodes) : el("div", {}, fieldNodes),
+      submitBar(env, ctx, () => {
+        const values = {};
+        fields.forEach(f => values[f.key] = controls[f.key].getValue());
+        return { form_values: values, user_selection: JSON.stringify(values) };
+      }, () => {
+        let bad = null;
+        fields.forEach(f => {
+          errBoxes[f.key].textContent = "";
+          const v = controls[f.key].getValue();
+          const empty = Array.isArray(v) ? !v.length : !v;
+          if (f.required && empty) {
+            errBoxes[f.key].textContent = "此项必填";
+            bad = bad || "请补全必填字段";
+          } else if (!empty && f.format === "phone" && !/^[\d+\-\s]{6,20}$/.test(v)) {
+            errBoxes[f.key].textContent = "请输入有效的手机号";
+            bad = bad || "手机号格式不正确";
+          } else if (!empty && f.format === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+            errBoxes[f.key].textContent = "请输入有效的邮箱地址";
+            bad = bad || "邮箱格式不正确";
+          } else if (Array.isArray(v)) {
+            const c = controls[f.key];
+            if (c.min && v.length && v.length < c.min) {
+              errBoxes[f.key].textContent = `至少选择 ${c.min} 项，当前 ${v.length} 项`;
+              bad = bad || "选择数量不符合要求";
+            } else if (c.max && v.length > c.max) {
+              errBoxes[f.key].textContent = `最多选择 ${c.max} 项，当前 ${v.length} 项`;
+              bad = bad || "选择数量不符合要求";
+            }
+          }
+        });
+        return bad;
+      }),
+    ]);
+  }
+
+  function rInputFollowup(env, ctx) {
+    const p = env.params;
+    const display = p.display || "box";
+    const field = display === "mini"
+      ? el("input", { type: "text", placeholder: p.placeholder || "补充说明" })
+      : el("textarea", { rows: 3, placeholder: p.placeholder || "补充说明" });
+    return compCard([
+      compTitle(p.prompt),
+      field,
+      submitBar(env, ctx, () => ({ user_selection: field.value.trim(), text: field.value.trim() }),
+        () => !field.value.trim() ? "请输入内容" : null),
+    ]);
+  }
+
+  // 物流轨迹卡（呈现型）：查件时由模型数据驱动——地图定位当前位置 + 节点时间线
+  function rTrackMap(env, ctx) {
+    const p = env.params;
+    const cur = p.current || {};
+    const kids = [compTitle(p.title || "物流轨迹")];
+    if (cur.lat && cur.lon) {
+      const d = 0.03;
+      const bbox = `${cur.lon - d},${cur.lat - d},${cur.lon + d},${cur.lat + d}`;
+      kids.push(el("iframe", {
+        class: "loc-map", loading: "lazy", referrerpolicy: "no-referrer",
+        title: "当前位置：" + (cur.name || ""),
+        src: `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${cur.lat},${cur.lon}`,
+      }));
+    }
+    kids.push(el("div", { class: "trk-cur" }, [
+      el("div", { class: "loc-main" }, [
+        el("div", { class: "loc-name" }, [cur.name || "运输中",
+          cur.status_text ? el("span", { class: "chip blue", style: "margin-left:6px" }, [cur.status_text]) : null]),
+        cur.addr ? el("div", { class: "loc-addr" }, [cur.addr]) : null,
+      ]),
+      cur.updated_text ? el("span", { class: "trk-upd num" }, [cur.updated_text]) : null,
+    ]));
+    if ((p.nodes || []).length) {
+      const tl = el("div", { class: "trk-list" });
+      p.nodes.forEach(n => tl.appendChild(el("div", { class: "trk-node " + (n.state || "todo") }, [
+        el("span", { class: "trk-dot" }),
+        el("div", { class: "trk-body" }, [
+          el("div", { class: "trk-text" }, [n.text]),
+          n.time ? el("div", { class: "trk-time num" }, [n.time]) : null,
+        ]),
+      ])));
+      kids.push(tl);
+    }
+    return compCard(kids);
+  }
+
+  // ---------- 补齐协议中定义但缺失的采集形式 ----------
+  function _dstr(offset) {
+    const d = new Date(Date.now() + offset * 86400000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  function _quickChips(presets, onPick) {
+    const box = el("div", { class: "quick-chips" });
+    presets.forEach(pr => box.appendChild(el("button", { type: "button", class: "quick-chip", onclick: (e) => {
+      onPick(pr);
+      box.querySelectorAll(".quick-chip").forEach(x => x.classList.remove("on"));
+      e.currentTarget.classList.add("on");
+    } }, [pr[0]])));
+    return box;
+  }
+  function rPickerDatetime(env, ctx) {
+    const p = env.params;
+    const withTime = (p.mode || p.display || "date") === "datetime";
+    const input = el("input", { type: withTime ? "datetime-local" : "date", style: "max-width:240px" });
+    // 可选范围：预约类场景选到过去的日期是错的，反过来查历史选到未来也是
+    const today = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const stamp = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+      + (withTime ? `T${pad(d.getHours())}:${pad(d.getMinutes())}` : "");
+    if (p.date_range === "future") input.min = stamp(today);
+    else if (p.date_range === "past") input.max = stamp(today);
+    return compCard([
+      compTitle(p.prompt),
+      input,
+      submitBar(env, ctx, () => ({ user_selection: input.value }),
+        () => !input.value ? (withTime ? "请选择日期和时间" : "请选择日期") : null),
+    ]);
+  }
+
+  // 地址库（演示数据：供应链基地常用节点，含真实坐标供地图展示）
+  const ADDRESS_BOOK = [
+    { name: "上海仓", addr: "上海市浦东新区外高桥保税区基隆路 1 号", lat: 31.353, lon: 121.588 },
+    { name: "宁波舟山港", addr: "浙江省宁波市北仑区港区大道", lat: 29.935, lon: 121.844 },
+    { name: "青岛港", addr: "山东省青岛市市北区港青路 6 号", lat: 36.088, lon: 120.316 },
+    { name: "深圳盐田港", addr: "广东省深圳市盐田区明珠道", lat: 22.577, lon: 114.271 },
+    { name: "天津港", addr: "天津市滨海新区新港二号路", lat: 39.003, lon: 117.712 },
+    { name: "广州南沙港", addr: "广州市南沙区港前大道南", lat: 22.759, lon: 113.607 },
+    { name: "成都青白江铁路港", addr: "成都市青白江区香岛大道 1 号", lat: 30.783, lon: 104.250 },
+    { name: "武汉阳逻港", addr: "武汉市新洲区平江东路", lat: 30.706, lon: 114.550 },
+  ];
+  function rPickerLocation(env, ctx) {
+    // 地址卡片：商家在配置里选好的地址（含详址）直接推给用户确认——平台不读取用户本地地址
+    const p = env.params;
+    const names = (p.options || []).length ? p.options : ADDRESS_BOOK.slice(0, 3).map(x => x.name);
+    const cards = names.map(n => ADDRESS_BOOK.find(bk => bk.name === n) || { name: n, addr: "" });
+    let picked = null;
+    const listBox = el("div", { class: "addr-list" });
+    const filter = cards.length > 4 ? el("input", { type: "text", placeholder: "筛选地址" }) : null;
+    function draw() {
+      listBox.innerHTML = "";
+      const kw = (filter?.value || "").trim().toLowerCase();
+      cards.filter(x => !kw || (x.name + x.addr).toLowerCase().includes(kw)).forEach(x => {
+        const isOn = picked && picked.name === x.name;
+        listBox.appendChild(el("div", { class: "addr-card" + (isOn ? " on" : ""), role: "radio",
+          "aria-checked": isOn ? "true" : "false", tabindex: "0",
+          onclick: () => { picked = x; draw(); },
+          onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); picked = x; draw(); } } }, [
+          selDot(isOn, false),
+          el("div", { class: "loc-main" }, [
+            el("div", { class: "loc-name" }, [x.name]),
+            x.addr ? el("div", { class: "loc-addr" }, [x.addr]) : null,
+          ]),
+        ]));
+      });
+    }
+    if (filter) filter.oninput = draw;
+    draw();
+    return compCard([
+      compTitle(p.prompt),
+      filter,
+      listBox,
+      el("div", { class: "muted" }, ["地址不对？直接在对话里说明，客服会为你修改"]),
+      submitBar(env, ctx, () => ({ options_offered: names, user_selection: picked?.name || "",
+        ...(picked?.addr ? { address_detail: picked.addr } : {}) }),
+        () => !picked ? "请选择一个地址" : null),
+    ]);
+  }
+
+  // 商品下单器：图 / 详情 / 销量 / 标签 / 价格与折扣 + 「去下单」转数量步进 + 合计
+  function rCommerce(env, ctx) {
+    const p = env.params;
+    const items = (p.options || []).map(name => ({ name, ...(p.option_meta || {})[name], qty: 0 }));
+    if (!items.length) return compCard([compTitle(p.prompt), emptyState(env)]);
+    const fmt = v => "¥" + (Number(v) || 0).toLocaleString("zh-CN");
+    const listBox = el("div", {});
+    const totalBar = el("div", { class: "cm-total" });
+    function doSubmit(btn) {
+      const picked = items.filter(it => it.qty > 0);
+      if (!picked.length) { UI.toast("请先选择商品", true); return; }
+      const payload = {
+        user_selection: picked.map(it => it.name),
+        order_items: picked.map(it => ({ name: it.name, qty: it.qty, price: Number(it.price) || 0 })),
+        order_total: picked.reduce((s2, it) => s2 + it.qty * (Number(it.price) || 0), 0),
+      };
+      env._submitted = true;
+      const root = totalBar.closest(".comp");
+      if (root) root.querySelectorAll("button, input, textarea, select").forEach(n => n.disabled = true);
+      btn.textContent = "已提交";
+      ctx.onCollectSubmit(payload, env);
+      if (env.params.echo_results && env.card_ref?.card_id) showEcho(env, totalBar, payload.user_selection);
+    }
+    function draw() {
+      listBox.innerHTML = "";
+      items.forEach(it => {
+        const price = Number(it.price) || 0;
+        const orig = Number(it.price_original) || 0;
+        const discount = orig > price && orig > 0 ? (price / orig * 10).toFixed(1).replace(/\.0$/, "") + "折" : null;
+        let act;
+        if (!it.qty) {
+          act = el("button", { class: "cm-order", type: "button",
+            onclick: () => { it.qty = 1; draw(); } }, ["去下单"]);
+        } else {
+          const minus = el("button", { type: "button", class: "cm-step", "aria-label": "减少",
+            onclick: () => { it.qty = Math.max(0, it.qty - 1); draw(); } }, ["-"]);
+          const plus = el("button", { type: "button", class: "cm-step", "aria-label": "增加",
+            onclick: () => { it.qty += 1; draw(); } }, ["+"]);
+          act = el("span", { class: "cm-qty" }, [minus, el("span", { class: "cm-qty-n num" }, [String(it.qty)]), plus]);
+        }
+        listBox.appendChild(el("div", { class: "cm-item" + (it.qty ? " on" : "") }, [
+          it.image
+            ? el("img", { class: "cm-img", src: it.image, alt: it.name })
+            : el("span", { class: "cm-img ph" }, [UI.icon("layers", 26)]),
+          el("div", { class: "cm-main" }, [
+            el("div", { class: "cm-name" }, [it.name]),
+            (it.desc && !it.sales && !(it.tags || []).length) ? el("div", { class: "cm-desc" }, [it.desc]) : null,
+            el("div", { class: "cm-meta" }, [
+              it.sales ? el("span", { class: "cm-sales num" }, [`已售 ${Number(it.sales) >= 10000 ? (it.sales / 10000).toFixed(1) + "w+" : it.sales}`]) : null,
+              ...(it.tags || []).map(t => el("span", { class: "cm-tag" }, [t])),
+            ]),
+            el("div", { class: "cm-price-row" }, [
+              el("span", { class: "cm-price num" }, [el("span", { class: "cm-yen" }, ["¥"]), String(price)]),
+              orig > price ? el("span", { class: "cm-orig num" }, [fmt(orig)]) : null,
+              discount ? el("span", { class: "cm-discount" }, [discount]) : null,
+              el("span", { style: "flex:1" }),
+              act,
+            ]),
+          ]),
+        ]));
+      });
+      const count = items.reduce((s2, it) => s2 + it.qty, 0);
+      const total = items.reduce((s2, it) => s2 + it.qty * (Number(it.price) || 0), 0);
+      totalBar.innerHTML = "";
+      if (count > 0 && !env._submitted) {
+        const sb = el("button", { class: "cm-submit", type: "button" }, [env.params.submit_label || "提交订单"]);
+        sb.onclick = () => doSubmit(sb);
+        totalBar.append(
+          el("span", { class: "muted" }, [`共 ${count} 件`]),
+          el("span", { class: "cm-total-val num" }, [`合计 ${fmt(total)}`]),
+          sb);
+      }
+    }
+    draw();
+    return compCard([
+      compTitle(p.prompt),
+      listBox,
+      totalBar,
+    ]);
+  }
+
+  // 步骤说明书：分步阅读引导（标题 + 正文 + 底部步骤圆点 + 上一步/下一步），读完记提交
+  function rGuideSteps(env, ctx) {
+    const p = env.params;
+    const steps = (p.steps || []).filter(st => st && (st.title || st.body)).slice(0, 10);
+    if (!steps.length) return compCard([compTitle(p.prompt), emptyState(env)]);
+    let idx = 0;
+    const viewed = new Set([0]);
+    const box = el("div", { class: "gs-body" });
+    const dots = el("div", { class: "gs-dots" });
+    const backB = el("button", { class: "btn small", type: "button", "aria-label": "上一步" }, ["上一步"]);
+    const nextB = el("button", { class: "btn small primary", type: "button", "aria-label": "下一步" }, ["下一步"]);
+    function finish() {
+      env._submitted = true;
+      const root = box.closest(".comp");
+      if (root) root.querySelectorAll("button").forEach(n => n.disabled = true);
+      nextB.textContent = "已读完";
+      ctx.onCollectSubmit({ user_selection: "已读完", steps_total: steps.length,
+        steps_viewed: viewed.size, completed: true,
+      }, env);
+    }
+    function draw() {
+      const st = steps[idx];
+      box.innerHTML = "";
+      box.appendChild(el("div", { class: "gs-title" }, [st.title || `第 ${idx + 1} 步`]));
+      if (st.body) box.appendChild(el("div", { class: "gs-text" }, [st.body]));
+      dots.innerHTML = "";
+      steps.forEach((_, i) => dots.appendChild(el("button", { type: "button",
+        class: "gs-dot" + (i === idx ? " on" : ""), "aria-label": `第 ${i + 1} 步`,
+        onclick: () => { if (env._submitted) return; idx = i; viewed.add(i); draw(); } }, [String(i + 1)])));
+      backB.disabled = idx === 0 || !!env._submitted;
+      nextB.textContent = idx === steps.length - 1 ? "完成" : "下一步";
+    }
+    backB.onclick = () => { if (idx > 0) { idx--; draw(); } };
+    nextB.onclick = () => {
+      if (idx < steps.length - 1) { idx++; viewed.add(idx); draw(); }
+      else finish();
+    };
+    draw();
+    return compCard([
+      compTitle(p.prompt),
+      box,
+      el("div", { class: "gs-foot" }, [dots, el("span", { style: "flex:1" }), backB, nextB]),
+    ], "comp-bare");
+  }
+
+  // 入口跳转器（已合并追问引导）：不配链接 = 追问发给 AI，配链接 = 直达页面；可回显「多少人点开」
+  function rEntryLink(env, ctx) {
+    const p = env.params;
+    const opts = p.options || [];
+    if (!opts.length) return compCard([compTitle(p.prompt), emptyState(env)]);
+    const meta = p.option_meta || {};
+    const acts = p.option_actions || {};
+    let clicked = null;
+    const listBox = el("div", { class: "el-list" });
+    function draw() {
+      listBox.innerHTML = "";
+      opts.forEach(o => {
+        const m = meta[o] || {};
+        const act = acts[o] || {};
+        const btn = el("button", { type: "button", class: "el-item" + (clicked === o ? " on" : ""),
+          title: act.api ? "打开：" + act.api : "继续向 AI 追问",
+          onclick: () => {
+            if (clicked) return;
+            clicked = o;
+            env._submitted = true;
+            draw();
+            if (act.api) window.open(act.api, "_blank", "noopener");
+            ctx.onCollectSubmit && ctx.onCollectSubmit({ user_selection: o, followup_kind: act.api ? "link" : "ask" }, env);
+            if (p.echo_results && env.card_ref?.card_id) {
+              const marker = el("div", {});
+              listBox.parentNode && listBox.parentNode.insertBefore(marker, listBox.nextSibling);
+              showEcho(env, marker, o);
+            }
+          } }, [
+          m.image
+            ? el("img", { class: "el-ico", src: m.image, alt: "" })
+            : el("span", { class: "el-ico ph" }, [o.slice(0, 1)]),
+          el("span", { class: "el-main" }, [
+            el("span", { class: "el-name" }, [o]),
+            m.desc ? el("span", { class: "el-sub" }, [m.desc]) : null,
+          ]),
+          el("span", { class: "el-arrow" }, [UI.icon(act.api ? "link" : "arrow", 14)]),
+        ]);
+        if (clicked && clicked !== o) btn.disabled = true;
+        listBox.appendChild(btn);
+      });
+    }
+    draw();
+    return compCard([p.prompt ? compTitle(p.prompt) : null, listBox], "comp-bare");
+  }
+
+  // 追问引导（兼容存量配置；新建请用入口跳转器）
+  function rSuggestFollowup(env, ctx) {
+    const p = env.params;
+    const opts = p.options || [];
+    if (!opts.length) return compCard([compTitle(p.prompt), emptyState(env)]);
+    const acts = p.option_actions || {};
+    let clicked = null;
+    const listBox = el("div", { class: "fu-list" });
+    function draw() {
+      listBox.innerHTML = "";
+      opts.forEach(o => {
+        const act = acts[o] || {};
+        const isLink = !!act.api;
+        const btn = el("button", { type: "button", class: "fu-item" + (clicked === o ? " on" : ""),
+          title: isLink ? "打开：" + act.api : "继续向 AI 追问",
+          onclick: () => {
+            if (clicked) return;
+            clicked = o;
+            env._submitted = true;
+            draw();
+            if (isLink) window.open(act.api, "_blank", "noopener");
+            ctx.onCollectSubmit && ctx.onCollectSubmit({ user_selection: o, followup_kind: isLink ? "link" : "ask" }, env);
+          } }, [
+          el("span", { class: "fu-text" }, [o]),
+          el("span", { class: "fu-ico" }, [UI.icon(isLink ? "link" : "arrow", 14)]),
+        ]);
+        if (clicked && clicked !== o) btn.disabled = true;
+        listBox.appendChild(btn);
+      });
+    }
+    draw();
+    return compCard([compTitle(p.prompt || "你可能还想问"), listBox]);
+  }
+
+  function rRank(env, ctx) {
+    const p = env.params;
+    let order = [...(p.items || p.options || [])];
+    if (!order.length) return compCard([compTitle(p.prompt), emptyState(env)]);
+    const listBox = el("div", { class: "rank-list" });
+    function getAfter(y) {
+      const els = [...listBox.querySelectorAll(".rank-item:not(.dragging)")];
+      return els.find(n => y <= n.getBoundingClientRect().top + n.offsetHeight / 2) || null;
+    }
+    const move = (i, d) => {
+      const j = i + d;
+      if (j < 0 || j >= order.length) return;
+      [order[i], order[j]] = [order[j], order[i]];
+      draw();
+    };
+    function draw() {
+      listBox.innerHTML = "";
+      order.forEach((o, i) => {
+        const item = el("div", { class: "rank-item", draggable: "true" }, [
+          el("span", { class: "rank-no num" + (i === 0 ? " top" : "") }, [String(i + 1)]),
+          el("span", { class: "opt-text" }, [o]),
+          // 触屏设备原生 drag 不可靠：上移 / 下移按钮保证移动端可用
+          el("span", { class: "rank-arrows" }, [
+            el("button", { class: "icon-btn", type: "button", "aria-label": "上移", ...(i === 0 ? { disabled: "" } : {}),
+              onclick: () => move(i, -1) }, [UI.icon("chevron", 13)]),
+            el("button", { class: "icon-btn", type: "button", "aria-label": "下移", ...(i === order.length - 1 ? { disabled: "" } : {}),
+              onclick: () => move(i, 1) }, [UI.icon("chevron", 13)]),
+          ]),
+          el("span", { class: "rank-drag", title: "按住拖动调整顺序" }, [UI.icon("drag", 14)]),
+        ]);
+        item.dataset.val = o;
+        item.addEventListener("dragstart", (e) => {
+          item.classList.add("dragging");
+          e.dataTransfer.effectAllowed = "move";
+          try { e.dataTransfer.setData("text/plain", o); } catch (err) {}
+        });
+        item.addEventListener("dragend", () => {
+          item.classList.remove("dragging");
+          order = [...listBox.querySelectorAll(".rank-item")].map(n => n.dataset.val);
+          draw();
+        });
+        listBox.appendChild(item);
+      });
+    }
+    listBox.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      const dragging = listBox.querySelector(".rank-item.dragging");
+      if (!dragging) return;
+      const after = getAfter(e.clientY);
+      if (after == null) listBox.appendChild(dragging);
+      else if (after !== dragging) listBox.insertBefore(dragging, after);
+    });
+    draw();
+    return compCard([
+      compTitle(p.prompt),
+      el("div", { class: "muted" }, ["拖动或用箭头调整顺序，按重要程度从上到下排序"]),
+      listBox,
+      submitBar(env, ctx, () => ({ options_offered: p.options, user_selection: order })),
+    ]);
+  }
+
+  function rTimerange(env, ctx) {
+    const p = env.params;
+    const isTime = (p.display || "date") === "time";
+    if (isTime) {
+      // 左栏日期 / 右栏时段（参考电商取件时间选择）：过期时段置灰，点选即定
+      const now = new Date();
+      const DAYS = [0, 1, 2, 3, 4].map(off => {
+        const d = new Date(Date.now() + off * 86400000);
+        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        const label = off === 0 ? "今天" : off === 1 ? "明天" : off === 2 ? "后天" : `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        return { off, iso, label };
+      });
+      const SLOTS = [["09:00", "11:00"], ["11:00", "13:00"], ["13:00", "15:00"], ["15:00", "17:00"], ["17:00", "19:00"]];
+      let dayIdx = 0;
+      let picked = null; // { iso, label, slot: "13:00-15:00" }
+      const daysCol = el("div", { class: "ts-days" });
+      const slotsCol = el("div", { class: "ts-slots" });
+      function expired(day, slot) {
+        if (day.off > 0) return false;
+        const [eh, em] = slot[1].split(":").map(Number);
+        return now.getHours() * 60 + now.getMinutes() >= eh * 60 + em;
+      }
+      function draw() {
+        daysCol.innerHTML = "";
+        DAYS.forEach((d, i) => daysCol.appendChild(el("button", { type: "button",
+          class: "ts-day" + (i === dayIdx ? " on" : ""),
+          onclick: () => { dayIdx = i; draw(); } }, [d.label])));
+        slotsCol.innerHTML = "";
+        const day = DAYS[dayIdx];
+        SLOTS.forEach(slot => {
+          const dead = expired(day, slot);
+          const label = `${slot[0]} – ${slot[1]}`;
+          const isOn = picked && picked.iso === day.iso && picked.slot === label;
+          slotsCol.appendChild(el("button", { type: "button",
+            class: "ts-slot" + (isOn ? " on" : ""), ...(dead ? { disabled: "" } : {}),
+            onclick: () => { picked = { iso: day.iso, label: day.label, slot: label }; draw(); } },
+            [el("span", {}, [label]), dead ? el("span", { class: "ts-dead" }, ["已过期"]) : (isOn ? UI.icon("check", 14) : null)]));
+        });
+      }
+      draw();
+      return compCard([
+        compTitle(p.prompt),
+        el("div", { class: "ts-wrap" }, [daysCol, slotsCol]),
+        submitBar(env, ctx, () => ({ user_selection: `${picked.label}（${picked.iso}） ${picked.slot}` }),
+          () => !picked ? "请选择一个时间段" : null),
+      ]);
+    }
+    // 日期段：起止日期 + 快捷区间；即时校验（起止联动约束 + 行内提示）
+    const today = _dstr(0);
+    const a2 = el("input", { type: "date", "aria-label": "开始", min: today });
+    const b2 = el("input", { type: "date", "aria-label": "结束", min: today });
+    const rangeErr = el("div", { class: "field-error", style: "margin-top:4px" });
+    function syncRange() {
+      // 选完开始，结束的可选下限自动跟上；反向同理
+      if (a2.value) b2.min = a2.value;
+      if (b2.value) a2.max = b2.value;
+      rangeErr.textContent = "";
+      if (a2.value && a2.value < today) rangeErr.textContent = "开始时间不能早于今天";
+      else if (a2.value && b2.value && a2.value > b2.value) rangeErr.textContent = "结束时间不能早于开始时间";
+    }
+    a2.onchange = syncRange;
+    b2.onchange = syncRange;
+    const quick = _quickChips(
+      [["今明两天", _dstr(0), _dstr(1)], ["未来三天", _dstr(0), _dstr(2)], ["未来一周", _dstr(0), _dstr(6)]],
+      pr => { a2.value = pr[1]; b2.value = pr[2]; syncRange(); });
+    return compCard([
+      compTitle(p.prompt),
+      quick,
+      el("div", { class: "range-row" }, [a2, el("span", { class: "muted" }, ["至"]), b2]),
+      rangeErr,
+      submitBar(env, ctx, () => ({ user_selection: `${a2.value} ~ ${b2.value}` }),
+        () => (!a2.value || !b2.value) ? "请选择起止时间"
+          : (a2.value < today ? "开始时间不能早于今天"
+          : (a2.value > b2.value ? "结束时间不能早于开始时间" : null))),
+    ]);
+  }
+
+  function _fileMeta(f) {
+    // 隐私：不上传原始文件名（可能含手机号等），只记类型与大小
+    const ext = (f.name.split(".").pop() || "").toLowerCase().slice(0, 8);
+    const size = f.size > 1048576 ? (f.size / 1048576).toFixed(1) + "MB" : Math.max(1, Math.round(f.size / 1024)) + "KB";
+    return { ext, size };
+  }
+  function rUpload(env, ctx) {
+    const p = env.params;
+    const file = el("input", { type: "file", accept: ".pdf,.doc,.docx,.xls,.xlsx,.csv,.zip", style: "display:none" });
+    const nameEl = el("span", { class: "muted" }, [p.placeholder || "PDF / Word / Excel，演示环境不实际上传"]);
+    file.onchange = () => { if (file.files[0]) { nameEl.textContent = file.files[0].name + "（仅本机可见，不上传文件名）"; nameEl.classList.remove("muted"); } };
+    return compCard([
+      compTitle(p.prompt),
+      el("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap" }, [
+        el("button", { class: "btn small", type: "button", onclick: () => file.click() }, [UI.icon("upload", 14), "选择文件"]),
+        nameEl, file,
+      ]),
+      submitBar(env, ctx, () => {
+        const m = _fileMeta(file.files[0]);
+        return { user_selection: `已上传文件（${m.ext} · ${m.size}）`, file_meta: m };
+      }, () => !file.files[0] ? "请先选择文件" : null),
+    ]);
+  }
+
+  function rUploadImage(env, ctx) {
+    const p = env.params;
+    const file = el("input", { type: "file", accept: "image/*", style: "display:none" });
+    const thumb = el("div", { class: "img-thumb", style: "display:none" });
+    const pickBtn = el("button", { class: "btn small", type: "button", onclick: () => file.click() }, [UI.icon("upload", 14), "拍照或选择图片"]);
+    const hintEl = el("span", { class: "muted" }, [p.placeholder || "支持 JPG / PNG，演示环境不真实上传"]);
+    file.onchange = () => {
+      const f = file.files[0];
+      if (!f) return;
+      const rdr = new FileReader();
+      rdr.onload = () => {
+        thumb.style.display = "";
+        thumb.innerHTML = "";
+        thumb.appendChild(el("img", { src: rdr.result, alt: "图片预览" }));
+        pickBtn.replaceChildren(UI.icon("refresh", 14), "更换图片");
+        hintEl.textContent = "仅本机预览，不上传原图与文件名";
+      };
+      rdr.readAsDataURL(f);
+    };
+    return compCard([
+      compTitle(p.prompt),
+      thumb,
+      el("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap" }, [pickBtn, hintEl, file]),
+      submitBar(env, ctx, () => {
+        const m = _fileMeta(file.files[0]);
+        return { user_selection: `已上传图片（${m.ext} · ${m.size}）`, file_meta: m };
+      }, () => !file.files[0] ? "请先拍照或选择图片" : null),
+    ]);
+  }
+
+  function rMatrixSelect(env, ctx) {
+    const p = env.params;
+    if (!(p.options || []).length) return compCard([compTitle(p.prompt), emptyState(env)]);
+    let picked = null;
+    const box = compCard([compTitle(p.prompt || p.title || "方案比选")]);
+    const tableBox = el("div", {});
+    const rerender = () => {
+      tableBox.innerHTML = "";
+      tableBox.appendChild(matrixTable(p, true, (opt) => { picked = opt; rerender(); }, picked, env.style_overrides));
+    };
+    rerender();
+    box.appendChild(tableBox);
+    box.appendChild(submitBar(env, ctx, () => ({
+      options_offered: p.options, recommended_default: p.recommended_default || null,
+      user_selection: picked, modified_from_default: picked !== p.recommended_default,
+      matrix_snapshot: { dimensions: p.dimensions, values: p.values },
+    }), () => picked == null ? "请先选择一个方案" : null));
+    return box;
+  }
+
+  function likertRange(lk) {
+    // 新版允许档位是数字或文字；统一按文本展示和回传。
+    if (Array.isArray(lk.levels)) {
+      const levels = lk.levels.map(v => String(v == null ? "" : v).trim()).filter(Boolean).slice(0, 11);
+      if (levels.length >= 2) return levels;
+    }
+    // 新协议 from/to（如 -2~2、0-10）；兼容旧 steps（1..steps）
+    if (lk.from != null && lk.to != null && lk.to > lk.from) {
+      const span = Math.min(11, lk.to - lk.from + 1);
+      return Array.from({ length: span }, (_, i) => lk.from + i);
+    }
+    const steps = Math.max(2, Math.min(10, lk.steps || 5));
+    return Array.from({ length: steps }, (_, i) => i + 1);
+  }
+
+  function rScaleLikert(env, ctx) {
+    const p = env.params;
+    const lk = p.likert || (Array.isArray(p.levels)
+      ? { levels: p.levels, left: p.left_label || "", right: p.right_label || "" }
+      : p.scale
+      ? { from: 1, to: Math.max(2, Math.min(11, p.scale)), left: p.low_label || "", right: p.high_label || "" }
+      : { left: "非常不认可", right: "非常认可", steps: 5 });
+    const values = likertRange(lk);
+    const soL = env.style_overrides || {};
+    const display = soL["lk.style"] || p.display || "dots";
+    let picked = null;
+    let body;
+    if (display === "bar") {
+      const segs = [];
+      body = el("div", {}, [
+        el("div", { class: "likert-bar" }, values.map((v, i) => {
+          const b = el("button", { type: "button", onclick: () => {
+            picked = v;
+            segs.forEach((x, xi) => x.classList.toggle("primary", xi <= i));
+          } }, [String(v)]);
+          segs.push(b);
+          return b;
+        })),
+        el("div", { style: "display:flex;justify-content:space-between;margin-top:4px" }, [
+          el("span", { class: "muted" }, [lk.left]), el("span", { class: "muted" }, [lk.right]),
+        ]),
+      ]);
+    } else {
+      const btns = [];
+      body = el("div", {}, [
+        el("div", { class: "likert-row" }, values.map(v => {
+          const b = el("button", { class: "btn opt likert", type: "button", onclick: () => {
+            picked = v;
+            btns.forEach(x => x.classList.remove("primary"));
+            b.classList.add("primary");
+          } }, [String(v)]);
+          btns.push(b);
+          return b;
+        })),
+        el("div", { style: "display:flex;justify-content:space-between;margin-top:6px" }, [
+          el("span", { class: "muted" }, [lk.left]), el("span", { class: "muted" }, [lk.right]),
+        ]),
+      ]);
+    }
+    return compCard([
+      compTitle(p.prompt),
+      body,
+      submitBar(env, ctx, () => ({
+        options_offered: values.map(String),
+        user_selection: picked,
+      }), () => picked == null ? "请先打分" : null),
+    ]);
+  }
+
+  // ================= 控制型 =================
+
+  function rConfirm(env, ctx) {
+    // v2.4 视觉重做：标题层次 + 右对齐动作行（去红条与 chip 的平铺感）
+    const p = env.params;
+    // 危险操作样式：开启走警示红，关闭走主题主色
+    const okCls = (env.style_overrides || {}).danger === false ? "btn primary" : "btn confirm-danger";
+    return compCard([
+      el("div", { style: "display:flex;gap:12px;align-items:flex-start" }, [
+        el("div", { style: "flex:1;min-width:0" }, [
+          el("div", { class: "confirm-title" }, [p.title || p.prompt || "确认操作"]),
+          p.prompt && p.title ? el("div", { class: "secondary", style: "margin-top:3px" }, [p.prompt]) : null,
+          (p.action_desc || p.summary) ? el("div", { class: "confirm-note" }, [p.action_desc || p.summary]) : null,
+        ]),
+      ]),
+      el("div", { style: "margin-top:14px;display:flex;gap:8px;justify-content:flex-end" }, [
+        el("button", { class: "btn", onclick: (e) => { disableSiblings(e); ctx.onControl("cancel", env); showActionEcho(env, "取消"); } }, [p.cancel_label || "取消"]),
+        el("button", { class: okCls, onclick: (e) => {
+          const btn = e.currentTarget;
+          disableSiblings(e);
+          // 与其他组件的提交一致：给出终态文字与成功提示，不能点完还是原样
+          btn.textContent = env.params.submitted_label || "已确认";
+          btn.classList.add("submitted");
+          const card = btn.closest(".comp");
+          if (card) {
+            card.querySelectorAll("button, input, select, textarea").forEach(n => { n.disabled = true; });
+            const tip = env.params.submit_feedback;
+            if (tip) card.appendChild(el("div", { class: "submit-feedback", role: "status" },
+              [UI.icon("check", 14), el("span", {}, [tip])]));
+          }
+          ctx.onControl("confirm", env); showActionEcho(env, "确认");
+        } }, [p.confirm_label || "确认执行"]),
+      ]),
+    ]);
+  }
+
+  function disableSiblings(e) {
+    e.target.parentElement.querySelectorAll("button").forEach(b => b.disabled = true);
+  }
+
+  function showActionEcho(env, selection) {
+    if (!env.params.echo_results || !env.card_ref?.card_id || !env._node) return;
+    const marker = el("div", { class: "echo-anchor" });
+    env._node.appendChild(marker);
+    showEcho(env, marker, selection);
+  }
+
+  function rRetry(env, ctx) {
+    return compCard([
+      el("div", { style: "display:flex;gap:8px" }, [
+        el("button", { class: "btn", onclick: (e) => { disableSiblings(e); ctx.onControl("retry", env); } }, ["换模型重答"]),
+      ]),
+    ]);
+  }
+
+  function rBranch(env, ctx) {
+    const p = env.params;
+    return compCard([
+      compTitle(p.prompt || "接下来怎么走"),
+      el("div", { style: "display:flex;gap:8px" }, [
+        el("button", { class: "btn", onclick: (e) => { disableSiblings(e); ctx.onControl("continue", env); } }, [p.continue_label || "沿当前方向继续"]),
+        el("button", { class: "btn", onclick: (e) => { disableSiblings(e); ctx.onControl("branch", env); } }, [p.branch_label || "换个方向"]),
+      ]),
+    ]);
+  }
+
+  // ================= 评价型 =================
+
+  function rFeedbackBinary(env, ctx) {
+    // v2.4：单组赞踩——一行轻量卡（多维度配置也只展示一组，维度取第一项）
+    const p = env.params || {};
+    const dim = ((p.dimensions || [])[0]) || { key: "capability" };
+    const up = el("button", { class: "fb-btn", title: "赞", "data-opt": "赞", onclick: () => {
+      up.disabled = down.disabled = true;
+      up.classList.add("on");
+      emitBinary(env, ctx, { key: dim.key }, 1.0, null);
+    } }, [UI.icon("thumbup", 13), "赞"]);
+    const down = el("button", { class: "fb-btn down", title: "踩", "data-opt": "踩", onclick: () => {
+      up.disabled = down.disabled = true;
+      down.classList.add("on");
+      askDownReason(env, ctx);
+    } }, [UI.icon("thumbdown", 13), "踩"]);
+    return compCard([
+      el("div", { style: "display:flex;align-items:center;gap:12px" }, [
+        el("span", { class: "secondary", style: "flex:1;min-width:0" }, [p.prompt || dim.label || "这条回答怎么样"]),
+        el("span", { class: "fb-pair" }, [up, down]),
+      ]),
+    ]);
+  }
+
+  function askDownReason(env, ctx) {
+    // 原因分组决定标签语义：答得不对 → capability；不合需要 → preference
+    // 业务可在实例配置里自定义原因（config.down_reasons，随 envelope 下发）
+    const custom = (env.params.down_reasons || []).map(String).filter(Boolean).slice(0, 6);
+    const groups = custom.length
+      ? [{ kind: "preference", title: "哪里不好", reasons: custom }]
+      : [
+        { kind: "capability", title: "答得不对", reasons: ["结论错误", "数据不对", "答非所问"] },
+        { kind: "preference", title: "不合需要", reasons: ["风格不合", "太啰嗦", "太简略"] },
+      ];
+    const body = el("div", {}, groups.map(g => el("div", { style: "margin-bottom:10px" }, [
+      el("div", { class: "muted", style: "margin-bottom:4px" }, [g.title]),
+      el("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, g.reasons.map(r =>
+        el("button", { class: "btn", onclick: () => {
+          emitBinary(env, ctx, { key: g.kind }, 0.0, r);
+          mask.remove();
+          UI.toast(ctx && ctx.preview ? "演示预览：反馈不会保存" : "已记录，谢谢反馈");
+        } }, [r]))),
+    ])));
+    const mask = UI.modal("哪里不好", body);
+  }
+
+  function emitBinary(env, ctx, dim, polarityVal, reason) {
+    ctx.sendEvent("feedback_given", env, { dimension: dim.key, value: polarityVal >= 0.5 ? "up" : "down", reason },
+      { label_hint: {
+        label_kind: dim.key === "capability" ? "capability" : "preference",
+        polarity: polarityVal >= 0.5 ? 1.0 : -1.0, confidence: 0.6,
+        target_models: env.params.target_models || [], source: "explicit_binary" } });
+    showActionEcho(env, polarityVal >= 0.5 ? "赞" : "踩");
+    UI.toast(ctx && ctx.preview ? "演示预览：反馈不会保存" : "反馈已记录，将用于优化模型调度");
+  }
+
+  function rFeedbackPreference(env, ctx) {
+    // 折叠呈现（走查 A9）：核心信号源，但不该在每条聚合回答下强占屏幕
+    const p = env.params;
+    const cands = p.candidates || [];
+    const box = el("div", { class: "comp" }, [
+      compTitle(p.prompt || "哪个回答更好？"),
+      el("div", { class: "muted", style: "font-size:var(--font-caption);margin-top:-4px" },
+        [`本次综合了 ${cands.length} 个候选回答，选出你认为更好的（可选）`]),
+    ]);
+    const list = el("div", { class: "fb-cands" });
+    cands.forEach((c, i) => {
+      const cell = el("div", { class: "fb-cand", role: "radio", "aria-checked": "false", tabindex: "0" }, [
+        el("div", { class: "fb-cand-head" }, [
+          el("span", { class: "chip blue" }, [c.alias || c.label || `候选 ${i + 1}`]),
+          el("span", { class: "fb-cand-check" }, [UI.icon("check", 12)]),
+        ]),
+        el("div", { class: "fb-cand-body" }, [c.content || ""]),
+      ]);
+      const pick = () => {
+        list.querySelectorAll(".fb-cand").forEach(d => { d.style.pointerEvents = "none"; d.classList.add("settled"); });
+        cell.classList.add("on");
+        cell.setAttribute("aria-checked", "true");
+        ctx.sendEvent("feedback_given", env, {
+          selected_model_id: c.model_id,
+          unselected_model_ids: cands.filter(x => x.model_id !== c.model_id).map(x => x.model_id),
+        });
+        UI.toast("已记录你的择优选择");
+      };
+      cell.onclick = pick;
+      cell.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } };
+      list.appendChild(cell);
+    });
+    box.appendChild(list);
+    return box;
+  }
+
+  function rChartWaterfall(env) {
+    // 瀑布图：增减项逐步累计的浮动柱（正主色 / 负危险色 / 合计灰）
+    const p = env.params;
+    const so = env.style_overrides || {};
+    const cats = (p.categories || []).slice(0, 10);
+    const vals = (p.values || []).slice(0, cats.length).map(Number);
+    const box = compCard([compTitle(p.title)]);
+    const host = el("div", {});
+    box.appendChild(host);
+    requestAnimationFrame(() => {
+      host.innerHTML = "";
+      const showTotal = so["total.show"] !== false;
+      const posC = so["wf.pos"] || "var(--success)";
+      const negC = so["wf.neg"] || "var(--danger)";
+      const labels = [...cats];
+      const segs = [];
+      let acc = 0;
+      vals.forEach(v => { segs.push([acc, acc + v, v]); acc += v; });
+      if (showTotal) { labels.push("合计"); segs.push([0, acc, acc, true]); }
+      const hi = Math.max(...segs.map(s2 => Math.max(s2[0], s2[1])), 1);
+      const lo = Math.min(...segs.map(s2 => Math.min(s2[0], s2[1])), 0);
+      const span = (hi - lo) || 1;
+      const w = 560, h = 190, padL = 44, padR = 12, padT = 14, padB = 30;
+      const svgNS = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(svgNS, "svg");
+      svg.setAttribute("viewBox", `0 0 ${w} ${h}`); svg.setAttribute("width", "100%"); svg.style.display = "block";
+      const y = v => padT + (h - padT - padB) * (1 - (v - lo) / span);
+      if (so.grid !== false) for (let g = 0; g <= 3; g++) {
+        const gy = padT + g * (h - padT - padB) / 3;
+        const gl = document.createElementNS(svgNS, "line");
+        gl.setAttribute("x1", padL); gl.setAttribute("x2", w - padR); gl.setAttribute("y1", gy); gl.setAttribute("y2", gy);
+        gl.setAttribute("stroke", "var(--border)"); svg.appendChild(gl);
+        const tl = document.createElementNS(svgNS, "text");
+        tl.setAttribute("x", padL - 6); tl.setAttribute("y", gy + 4); tl.setAttribute("text-anchor", "end");
+        tl.setAttribute("font-size", "10"); tl.setAttribute("fill", "var(--text-muted)");
+        tl.textContent = String(Math.round(hi - g * span / 3));
+        svg.appendChild(tl);
+      }
+      const slot = (w - padL - padR) / segs.length;
+      const bw = Math.min(40, slot * 0.55);
+      // 柱间连接虚线：表达「上一柱终点 = 下一柱起点」的累计关系（主流瀑布图标配）
+      if (so["connector.show"] !== false) segs.forEach((s2, i) => {
+        if (i >= segs.length - 1) return;
+        const endV = s2[3] ? s2[1] : s2[1];
+        const x1 = padL + i * slot + (slot - bw) / 2 + bw;
+        const x2 = padL + (i + 1) * slot + (slot - bw) / 2;
+        const cl = document.createElementNS(svgNS, "line");
+        cl.setAttribute("x1", x1); cl.setAttribute("x2", x2);
+        cl.setAttribute("y1", y(endV)); cl.setAttribute("y2", y(endV));
+        cl.setAttribute("stroke", "var(--border-strong, #C7D3DC)"); cl.setAttribute("stroke-dasharray", "3 3");
+        svg.appendChild(cl);
+      });
+      segs.forEach((s2, i) => {
+        const [a, b2, v, isTotal] = s2;
+        const x0 = padL + i * slot + (slot - bw) / 2;
+        const rect = document.createElementNS(svgNS, "rect");
+        rect.setAttribute("x", x0); rect.setAttribute("y", Math.min(y(a), y(b2)));
+        rect.setAttribute("width", bw); rect.setAttribute("height", Math.max(2, Math.abs(y(a) - y(b2))));
+        rect.setAttribute("rx", 3);
+        rect.setAttribute("fill", isTotal ? (so["total.color"] || "var(--text-muted)") : v >= 0 ? posC : negC);
+        const t = document.createElementNS(svgNS, "title");
+        t.textContent = `${labels[i]}: ${v >= 0 && !isTotal ? "+" : ""}${v}`;
+        rect.appendChild(t);
+        svg.appendChild(rect);
+        if (so.value_labels !== false && segs.length <= 10) {
+          const vt = document.createElementNS(svgNS, "text");
+          vt.setAttribute("x", x0 + bw / 2); vt.setAttribute("y", Math.min(y(a), y(b2)) - 4);
+          vt.setAttribute("text-anchor", "middle"); vt.setAttribute("font-size", "10");
+          vt.setAttribute("fill", "var(--text-secondary)");
+          vt.textContent = (v >= 0 && !isTotal ? "+" : "") + v;
+          svg.appendChild(vt);
+        }
+        const cx = document.createElementNS(svgNS, "text");
+        cx.setAttribute("x", x0 + bw / 2); cx.setAttribute("y", h - 10);
+        cx.setAttribute("text-anchor", "middle"); cx.setAttribute("font-size", "10");
+        cx.setAttribute("fill", "var(--text-muted)");
+        cx.textContent = String(labels[i]).slice(0, 6);
+        svg.appendChild(cx);
+      });
+      host.appendChild(svg);
+    });
+    return box;
+  }
+
+  const RENDERERS = {
+    "text.emphasis": rText,
+    "metric.card": rMetric,
+    "list.ordered": rListOrdered,
+    "timeline": rTimeline,
+    "steps": rSteps,
+    "table": rTable,
+    "chart.line": rChartLine,
+    "chart.area": rChartLine,
+    "chart.bar": rChartBar,
+    "chart.pie": rChartPie,
+    "chart.waterfall": rChartWaterfall,
+    "matrix.compare": rMatrixCompare,
+    "flow.reasoning": rFlowReasoning,
+    "citation.card": rCitation,
+    "select.single": rSelectSingle,
+    "select.card": rSelectCard,
+    "select.multi": rSelectMulti,
+    "slider.range": rSlider,
+    "scale.likert": rScaleLikert,
+    "form.structured": rForm,
+    "input.followup": rInputFollowup,
+    "matrix.compare+select": rMatrixSelect,
+    "picker.datetime": rPickerDatetime,
+    "picker.timerange": rTimerange,
+    "picker.location": rPickerLocation,
+    "rank.priority": rRank,
+    "upload.file": rUpload,
+    "upload.image": rUploadImage,
+    "suggest.followup": rSuggestFollowup,
+    "commerce.order": rCommerce,
+    "entry.link": rEntryLink,
+    "guide.steps": rGuideSteps,
+    "track.map": rTrackMap,
+    "control.confirm": rConfirm,
+    "control.retry": rRetry,
+    "control.branch": rBranch,
+    "feedback.binary": rFeedbackBinary,
+    "feedback.preference": rFeedbackPreference,
+  };
+
+  // 只改样式时就地更新，不重建整棵组件：拖滑杆时预览不再整块闪
+  function restyle(root, so, componentType) {
+    const node = root && (root.classList && root.classList.contains("comp") ? root : root.querySelector(".comp"));
+    if (!node) return false;
+    node.style.cssText = "";
+    STYLE_CLASSES.forEach(c => node.classList.remove(c));
+    applyStyleOverrides(node, so, componentType);
+    // 提交按钮的变量挂在按钮自己身上，一并刷新
+    node.querySelectorAll(".comp-submit, button.btn.primary").forEach(btn => {
+      btn.style.cssText = "";
+      applySubmitButtonStyle(btn, so);
+    });
+    return true;
+  }
+
+  return { render, restyle, supported: Object.keys(RENDERERS) };
+})();

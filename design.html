@@ -1,0 +1,1249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5.5' fill='%231DA1F2'/%3E%3Crect x='10.5' y='3.6' width='9.6' height='7.3' rx='2.7' fill='none' stroke='%23fff' stroke-width='1.5' opacity='0.75'/%3E%3Cpath d='M3.4 12a3.7 3.7 0 0 1 3.7-3.7h6a3.7 3.7 0 0 1 3.7 3.7v2.3a3.7 3.7 0 0 1-3.7 3.7H9.5l-3.1 2.6c-.55.46-1.3.07-1.3-.64v-2.4A3.7 3.7 0 0 1 3.4 14.3z' fill='%23fff'/%3E%3Ccircle cx='7.4' cy='13.1' r='1.05' fill='%231DA1F2'/%3E%3Ccircle cx='10.25' cy='13.1' r='1.05' fill='%231DA1F2'/%3E%3Ccircle cx='13.1' cy='13.1' r='1.05' fill='%231DA1F2'/%3E%3C/svg%3E">
+<title>风格主题 · 智能交互平台</title>
+<link rel="stylesheet" href="./shared.css?v=267b358b">
+<link rel="prefetch" href="./analytics.html"><link rel="prefetch" href="./audit.html"><link rel="prefetch" href="./cards.html"><link rel="prefetch" href="./design.html"><link rel="prefetch" href="./embed-demo.html"><link rel="prefetch" href="./index.html"><link rel="prefetch" href="./products.html">
+<style>
+  /* 两列：左选择/导入，右单组件预览 */
+  .style-split { display: grid; grid-template-columns: minmax(440px, 48fr) minmax(0, 52fr); gap: 16px; align-items: start; }
+  @media (max-width: 1000px) { .style-split { grid-template-columns: 1fr; } }
+  .demo-one { max-width: none; }
+  /* 组件示例网格（与组件模板同款陈列） */
+  .demo-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; align-items: stretch; }
+  .demo-card { display: flex; flex-direction: column; gap: 8px; height: 100%; }
+  .demo-card .head { display: flex; align-items: center; gap: 8px; }
+  .demo-card .head .name { font-weight: 700; font-size: var(--font-base); }
+  .demo-card .mock-area { flex: 1; display: flex; flex-direction: column; }
+  .demo-card .mock-area .chat-mock { flex: 1; }
+  /* Figma 级 token 编辑行 */
+  .tok-group { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; background: #fff; }
+  .tok-group summary { cursor: pointer; padding: 9px 14px; font-weight: 600; font-size: var(--font-small); color: var(--text-secondary); user-select: none; }
+  .tok-group[open] summary { border-bottom: 1px solid var(--border); }
+  .tok-rows { padding: 6px 10px 10px; }
+  .tok-row { display: grid; grid-template-columns: 26px minmax(0, 1fr) 90px 46px; gap: 3px 9px;
+    align-items: center; padding: 8px 5px; border-radius: 8px; }
+  .tok-row > .tok-chip { grid-column: 1; grid-row: 1; }
+  .tok-row > .tok-name { grid-column: 2; grid-row: 1; }
+  .tok-row > .tok-hex { grid-column: 3; grid-row: 1; }
+  .tok-row > .tok-demo-host { grid-column: 4; grid-row: 1; }
+  .tok-row > .tok-desc { grid-column: 2 / -1; grid-row: 2; }
+  .tok-row:hover { background: var(--bg-surface); }
+  .tok-chip { width: 26px; height: 26px; padding: 1px; border: 1px solid var(--border); border-radius: 7px; cursor: pointer; flex: none; }
+  .tok-name { font-size: var(--font-small); font-weight: 600; white-space: nowrap; }
+  .tok-var { font-family: var(--font-mono, ui-monospace, Menlo, monospace); font-size: 10.5px;
+    color: var(--text-secondary); background: var(--bg-surface); border-radius: 4px; padding: 0 4px; margin-right: 5px; }
+  .tok-desc { font-size: var(--font-caption); color: var(--text-muted); line-height: 1.55; }
+  .tok-demo-host { flex: none; display: inline-flex; }
+  .tok-demo { display: inline-flex; align-items: center; justify-content: center;
+    width: 46px; height: 24px; border-radius: 6px; border: 1px solid var(--border); overflow: hidden; }
+  .tok-demo i { display: block; }
+  .tok-key { font-size: 11px; color: var(--text-muted); flex: 1; }
+  .tok-hex { width: 100%; min-width: 0; font-family: var(--font-mono, monospace); font-size: 11.5px; padding: 4px 6px; text-transform: uppercase; }
+</style>
+</head>
+<body class="has-side">
+<div class="page design-page">
+  <!-- 标题只出现一次：列表态是「风格主题」，编辑态换成「返回 + 主题名 + 操作」 -->
+  <div class="page-head ds-head" id="brandHead">
+    <div class="page-head-main">
+      <div class="page-title" id="brandHeadTitle">风格主题</div>
+      <div class="page-desc" id="brandHeadDesc">定义一套视觉风格，绑定给产品后成为其组件的默认样式。</div>
+    </div>
+    <span class="muted" id="brandCount" style="font-size:var(--font-caption)"></span>
+    <div style="flex:1"></div>
+    <span id="brandHeadActions"></span>
+  </div>
+
+  <div class="style-split">
+    <div class="ds-left">
+      <aside class="card ds-theme-detail" id="currentThemeCard" aria-label="当前主题详细设置">
+        <div id="currentThemeDetail"></div>
+      </aside>
+      <div class="card ds-editor" id="editorCard" hidden>
+        <div id="styleEditor"></div>
+      </div>
+    </div>
+
+    <div class="card ds-preview">
+      <!-- 预览固定不滚：左边表单再长，右边这块也不动 -->
+      <div class="ds-preview-head">
+        <div class="ds-preview-title">
+          <span style="font-weight:600">组件预览</span>
+          <span class="muted">配置修改会实时显示在这里</span>
+        </div>
+        <div style="flex:1"></div>
+        <span id="compSelMount"></span>
+      </div>
+      <div id="demoOne" class="demo-one"></div>
+    </div>
+  </div>
+</div>
+
+<script>window.SIA_PLATFORM="ia";</script>
+<script src="./mock_data.js?v=80b192ff"></script>
+<script src="./mock_api.js?v=1c833357"></script>
+<script src="./tokens.js?v=c64e4c82"></script>
+<script src="./ui.js?v=56bad845"></script>
+<script src="./components.js?v=6cdeae87"></script>
+<script>
+// 深链直开编辑器时，先行标记以免生效风格覆盖预览
+if (new URLSearchParams(location.search).get("new")) window._editingStyle = true;
+UI.nav("design");
+const { el } = UI;
+
+
+let brands = [];                 // /api/brands 返回的预设 + 已导入
+let products = [];               // 用于统计每个风格被哪些产品使用
+let previewFile = "brand-tokens.default.json";   // 当前预览中的风格
+
+// ---------- 组件示例（真实场景数据） ----------
+const SCENES = {
+  "select.single": { name: "文本选择器", q: "有哪些处理方式可以选？", reply: "为你找到以下可选方式。", prompt: "请选择处理方式",
+    config: { options: ["方案 A · 时效优先", "方案 B · 成本优先"], recommended_default: "方案 A · 时效优先" } },
+  "select.card": { name: "卡片选择器", q: "帮我选个运输方案", reply: "两个方案供你选择：", prompt: "选择运输方案",
+    config: { options: ["海运直达", "海铁联运"], recommended_default: "海运直达",
+      option_meta: { "海运直达": { desc: "35 天 · 成本低" }, "海铁联运": { desc: "26 天 · 快 9 天" } } } },
+  "rank.priority": { name: "优先级排序器", q: "这批货怎么安排比较好", reply: "请把你的诉求按重要程度排个序：", prompt: "哪个对你最重要？",
+    config: { options: ["时效最快", "成本最低", "风险最小"] } },
+  "matrix.compare+select": { name: "表格选择器", q: "对比一下这几家供应商", reply: "按价格、时效、合规评估如下：", prompt: "选定供应商",
+    config: { options: ["中远供应链", "环球捷运"], dimensions: ["价格", "时效", "合规"] } },
+  "scale.likert": { name: "评分器", q: "谢谢，问题解决了", reply: "不客气。", prompt: "这次服务满意吗？",
+    config: { likert: { left: "很不满意", right: "很满意", from: 1, to: 5 } } },
+  "form.structured": { name: "表单收集工具", q: "我要退货", reply: "请补充以下信息，我来为你登记。", prompt: "退货登记",
+    config: { fields: [{ key: "order_no", label: "订单号", required: true }, { key: "phone", label: "联系电话", required: true }] } },
+  "slider.range": { name: "数值选择器", q: "帮我做个采购预算", reply: "先确认一下预算范围。", prompt: "预算上限（万元）",
+    config: { slider: { min: 0, max: 100, unit: "万元" } } },
+  "input.followup": { name: "备注填写器", q: "送货有点要求", reply: "好的，请留下送货备注：", prompt: "送货备注",
+    config: { placeholder: "例如：周五前送到，放前台即可" } },
+  "picker.datetime": { name: "日期选择器", q: "帮我约个提货时间", reply: "好的，请选择提货日期：", prompt: "期望提货日期", config: {} },
+  "picker.timerange": { name: "时间段选择器", q: "什么时候方便上门取件", reply: "请选择方便的时间段：", prompt: "取件时间段", config: { display: "time" } },
+  "picker.location": { name: "地址卡片", q: "这批货送到仓库", reply: "请确认收货地点：", prompt: "收货地点",
+    config: { options: ["上海仓", "宁波舟山港", "青岛港"] } },
+  "upload.file": { name: "文件上传器", q: "报关材料给你", reply: "请上传相关单据：", prompt: "上传报关单",
+    config: { placeholder: "请上传报关单或合同文件（PDF / Excel）" } },
+  "upload.image": { name: "图片上传器", q: "货有点破损，我拍了照片", reply: "请上传破损部位的照片：", prompt: "上传破损照片",
+    config: { placeholder: "请拍摄或上传清晰照片" } },
+  "commerce.order": { name: "商品下单器", q: "这批设备怕震，帮我加固一下", reply: "推荐以下增值服务，可直接下单：", prompt: "选择增值服务",
+    config: { options: ["木箱加固", "运输保价"],
+      option_meta: { "木箱加固": { desc: "出口级木箱，防潮防震", price: 120, price_original: 150, sales: 2300, tags: ["防潮"] },
+                     "运输保价": { desc: "按货值 0.3% 投保", price: 50, price_original: 60, sales: 5100, tags: ["全额赔付"] } } } },
+  "entry.link": { name: "入口跳转器", q: "还有什么优惠活动吗", reply: "为你找到两个专区：", prompt: "",
+    config: { options: ["神券团购专区", "增值服务商城"],
+      option_meta: { "神券团购专区": { desc: "咖啡茶饮 5 折起" }, "增值服务商城": { desc: "加固 · 保价 · 耗材" } } } },
+  "suggest.followup": { name: "追问引导器", q: "帮我查一下这票货到哪了", reply: "这票货已到宁波舟山港中转，预计后天送达。", prompt: "你可能还想问",
+    config: { options: ["为什么会延误", "预计什么时候能到", "帮我催一下这票货"] } },
+};
+
+function buildEnvelope(ct, config, prompt) {
+  const params = { prompt: ct === "entry.link" ? (prompt || "") : (prompt || "请选择"), submit_label: ct === "commerce.order" ? "去下单" : "提交", reply_text: "", echo_results: false };
+  if (config.options) { params.options = config.options; params.recommended_default = config.recommended_default || null; }
+  if (config.option_meta) params.option_meta = config.option_meta;
+  if (config.option_actions) params.option_actions = config.option_actions;
+  if (ct === "matrix.compare+select") {
+    params.dimensions = config.dimensions || ["价格", "时效"];
+    params.values = (params.options || []).map((o, i) => params.dimensions.map((d, j) => Math.round((5 + ((i * 3 + j * 2) % 40) / 10) * 10) / 10));
+  }
+  if (ct === "scale.likert") params.likert = config.likert;
+  if (ct === "form.structured") params.fields = config.fields;
+  if (ct === "input.followup" || ct === "picker.location" || ct === "upload.file") params.placeholder = config.placeholder || "";
+  if (ct === "slider.range") { const s = config.slider || {}; params.min = s.min ?? 0; params.max = s.max ?? 100; params.unit = s.unit || ""; }
+  return { schema_version: "1.0.0", render_id: "ds-" + Math.random().toString(36).slice(2), component_type: ct,
+    semantic_category: "collect", trigger_source: "model_tool_call", card_ref: null, params, group_mode: null, degraded_text: params.prompt };
+}
+const previewCtx = { sendEvent: () => {}, onCollectSubmit: () => UI.toast("演示预览：提交不会保存"), onControl: () => {}, titleInBubble: true, preview: true };
+
+// 单组件预览：下拉选组件，选一个看一个
+const TRACK_ENV = { schema_version: "1.0.0", render_id: "ds-track", component_type: "track.map",
+  semantic_category: "present", trigger_source: "model_tool_call", card_ref: null, group_mode: null,
+  degraded_text: "物流轨迹", params: { title: "物流轨迹",
+    current: { name: "宁波舟山港中转场", addr: "浙江省宁波市北仑区港区大道", lat: 29.935, lon: 121.844,
+               status_text: "运输中", updated_text: "2 小时前更新" },
+    nodes: [
+      { time: "08-25 09:12", text: "已揽收（上海仓）", state: "done" },
+      { time: "08-26 21:40", text: "干线运输中，到达宁波舟山港中转场", state: "current" },
+      { time: "", text: "到达目的地网点，安排派送", state: "todo" },
+    ] } };
+let demoCt = "select.single";
+// v2.2：多组件同屏预览——一次看全代表性组件在当前风格下的效果（交互 3 + 展示 3）
+const DEMO_GRID = [
+  ["select.single", { component_type: "select.single", semantic_category: "collect",
+    params: { prompt: "请选择处理方式", options: ["方案 A · 时效优先", "方案 B · 成本优先", "方案 C · 均衡"], submit_label: "确认" } }],
+  ["control.confirm", { component_type: "control.confirm", semantic_category: "control",
+    params: { prompt: "确认取消本次订单？该操作不可撤销。", summary: "取消后已支付金额将原路退回" } }],
+  ["form.structured", { component_type: "form.structured", semantic_category: "collect",
+    params: { prompt: "请补充以下信息", fields: [{ key: "n", label: "联系人", required: true }, { key: "p", label: "联系方式", required: true }], submit_label: "提交" } }],
+  ["chart.line", { component_type: "chart.line", semantic_category: "present",
+    params: { title: "近半年走势", categories: ["4月", "5月", "6月", "7月", "8月", "9月"], series: [{ name: "金额", values: [122, 165, 148, 161, 178, 190] }] } }],
+  ["chart.pie", { component_type: "chart.pie", semantic_category: "present",
+    params: { title: "构成占比", slices: [{ label: "华东", value: 42 }, { label: "华南", value: 27 }, { label: "其他", value: 31 }] } }],
+  ["metric.card", { component_type: "metric.card", semantic_category: "present",
+    params: { label: "本月累计金额", value: "1,286", unit: "万元", delta: "4.2%" } }],
+];
+const DEMO_GRID_B = [
+  ["scale.likert", { component_type: "scale.likert", semantic_category: "evaluate",
+    params: { prompt: "请为本次服务打分", scale: 5, low_label: "很不满意", high_label: "非常满意", submit_label: "提交" } }],
+  ["steps", { component_type: "steps", semantic_category: "present",
+    params: { title: "操作指引", steps: ["填写信息", "上传凭证", "等待审核"], current_index: 1 } }],
+  ["table", { component_type: "table", semantic_category: "present",
+    params: { title: "分区域概览", columns: ["区域", "数量", "环比"], rows: [["华东", "352", "2.3%"], ["华南", "332", "1.5%"]] } }],
+  ["chart.waterfall", { component_type: "chart.waterfall", semantic_category: "present",
+    params: { title: "利润构成", categories: ["营收", "运费", "仓储", "退款"], values: [420, -86, -54, -32] } }],
+  ["timeline", { component_type: "timeline", semantic_category: "present",
+    params: { title: "处理进度", events: [{ ts: "09:20", title: "已受理" }, { ts: "10:05", title: "处理中" }, { ts: "11:40", title: "已完成" }] } }],
+  ["feedback.binary", { component_type: "feedback.binary", semantic_category: "evaluate",
+    params: { prompt: "这条回答怎么样" } }],
+];
+function renderDemos() {
+  const boxOne = document.getElementById("demoOne");
+  boxOne.innerHTML = "";
+  // 行高固定：改紧凑度只让组件内部变紧，组件之间的间距与占位不跟着跳
+  const grid2 = el("div", { class: "demo-grid2" });
+  (typeof demoBatch !== "undefined" && demoBatch === 1 ? DEMO_GRID_B : DEMO_GRID).forEach(([ct, envBase]) => {
+    let node;
+    try {
+      node = Components.render({ schema_version: "1.0.0", render_id: "brand-pv-" + ct,
+        trigger_source: "brand_preview", card_ref: null, ...envBase }, previewCtx);
+    } catch (e) { node = el("div", { class: "muted" }, ["暂不支持预览"]); }
+    grid2.appendChild(el("div", { class: "brand-scope demo-cell" }, [node]));
+  });
+  boxOne.appendChild(grid2);
+}
+let demoBatch = 0;
+function mountDemoControls() {
+  const m = document.getElementById("compSelMount");
+  if (m) m.appendChild(el("button", { class: "btn small", type: "button",
+    onclick: () => { demoBatch = (demoBatch + 1) % 2; renderDemos(); } }, ["换一批"]));
+}
+
+// ---------- 导入 / 编辑风格主题：弹窗建卡片（名称 + 风格代码），创建后出现在列表，可编辑 / 删除 ----------
+function brandDialog(existing, onClose) {
+  const host = document.getElementById("styleEditor");
+  // 成套色盘：主色 / 浅主色(浅色模式) / 深主色底(深色模式) / 成功 / 警告 / 危险
+  // ================= Figma 级 token 体系：整套预设起步 + 逐 token 细颗粒度编辑 + 明暗双模式 =================
+  // 每套预设 = 明暗两份完整语义色板 + 图表序列色；选中预设后任意 token 可单独改。
+  // 每套预设 = 一种行业观感：明暗双色板 + 图表序列 + 形态参数（圆角 / 阴影 / 密度 / 字号）。
+  // 风格不只是颜色——政企要方正紧凑、自然清新要圆润宽松，形态跟着一起走才像那么回事。
+  const THEME_PRESETS = [
+    { name: "政企风", desc: "权威克制，信息密度高，方正少装饰",
+      opts: { radius: 6, shadow: 1, density: 1, size_px: 13, font: 0, weight: 1 },
+      light: { primary: "#1A5FA8", primary_weak: "#E8F0F9", accent: "#B07D2E", ring: "#1A5FA8",
+        bg_page: "#FFFFFF", bg_surface: "#F7F9FB", bg_elevated: "#FFFFFF", bg_sunken: "#EDF1F6", border: "#DCE3EB",
+        text_primary: "#16202E", text_secondary: "#4C5A6E", text_muted: "#6A778A",
+        success: "#1F7A4D", warning: "#B5820A", danger: "#C0392B" },
+      dark: { primary: "#4C8FD4", primary_weak: "#152739", accent: "#C9A054", ring: "#4C8FD4",
+        bg_page: "#0E141C", bg_surface: "#151D27", bg_elevated: "#1A232F", bg_sunken: "#0A0F15", border: "#27333F",
+        text_primary: "#E9EEF4", text_secondary: "#A3B0C0", text_muted: "#7E8A9B",
+        success: "#3BA870", warning: "#D4A33C", danger: "#E06B5C" },
+      chart: ["#1A5FA8", "#4C8FD4", "#B07D2E", "#5C7A94", "#3D8E7A", "#8A6FA8", "#A8623C"] },
+
+    { name: "科技简约", desc: "现代干净，留白充足，层次清晰",
+      opts: { radius: 12, shadow: 2, density: 2, size_px: 13, font: 0, weight: 1 },
+      light: { primary: "#5B5BD6", primary_weak: "#EEEEFB", accent: "#0EA5A5", ring: "#5B5BD6",
+        bg_page: "#FFFFFF", bg_surface: "#FAFAFC", bg_elevated: "#FFFFFF", bg_sunken: "#F0F0F5", border: "#E4E4ED",
+        text_primary: "#1A1A24", text_secondary: "#54546B", text_muted: "#74748D",
+        success: "#30A46C", warning: "#C6880B", danger: "#DC4A4F" },
+      dark: { primary: "#8B8BE8", primary_weak: "#22224A", accent: "#2CC0C0", ring: "#8B8BE8",
+        bg_page: "#0F0F16", bg_surface: "#17171F", bg_elevated: "#1C1C26", bg_sunken: "#0A0A10", border: "#2B2B38",
+        text_primary: "#EDEDF2", text_secondary: "#A8A8BC", text_muted: "#82829A",
+        success: "#3FB47C", warning: "#DCA43B", danger: "#EA6B70" },
+      chart: ["#5B5BD6", "#0EA5A5", "#E8833A", "#D6409F", "#3FB47C", "#8B6FD4", "#5C8DC4"] },
+
+    { name: "自然清新", desc: "柔和有呼吸感，微暖底色，圆润宽松",
+      opts: { radius: 16, shadow: 1, density: 3, size_px: 14, font: 0, weight: 1 },
+      light: { primary: "#2E9E6B", primary_weak: "#E7F5EE", accent: "#C08040", ring: "#2E9E6B",
+        bg_page: "#FDFDFB", bg_surface: "#F7F9F5", bg_elevated: "#FFFFFF", bg_sunken: "#EEF2EA", border: "#DFE7DB",
+        text_primary: "#1C2A22", text_secondary: "#4F6055", text_muted: "#68796E",
+        success: "#2E9E6B", warning: "#B9860C", danger: "#CB4B3F" },
+      dark: { primary: "#4FBA88", primary_weak: "#123024", accent: "#D49A5E", ring: "#4FBA88",
+        bg_page: "#0F1512", bg_surface: "#16201A", bg_elevated: "#1B2620", bg_sunken: "#0B100D", border: "#28372E",
+        text_primary: "#EBF2ED", text_secondary: "#A6BAAE", text_muted: "#7F9488",
+        success: "#4FBA88", warning: "#D8A64A", danger: "#E46E60" },
+      chart: ["#2E9E6B", "#C08040", "#4C8DC4", "#8FAE4A", "#C2678A", "#5FB0A8", "#9E7BC8"] },
+
+    { name: "数字电商", desc: "活力促单，对比强烈，信息紧凑",
+      opts: { radius: 12, shadow: 2, density: 1, size_px: 13, font: 0, weight: 1 },
+      light: { primary: "#E8452C", primary_weak: "#FDECE8", accent: "#F5A623", ring: "#E8452C",
+        bg_page: "#FFFFFF", bg_surface: "#FBF8F7", bg_elevated: "#FFFFFF", bg_sunken: "#F4EFED", border: "#EBE2DF",
+        text_primary: "#241816", text_secondary: "#5E4D49", text_muted: "#86726D",
+        success: "#2E9E5B", warning: "#C4820A", danger: "#D03A2E" },
+      dark: { primary: "#FF6A4D", primary_weak: "#3A1C16", accent: "#FFB93F", ring: "#FF6A4D",
+        bg_page: "#161110", bg_surface: "#1F1817", bg_elevated: "#251D1B", bg_sunken: "#100C0B", border: "#382C29",
+        text_primary: "#F6EFED", text_secondary: "#C4B0AB", text_muted: "#9C8781",
+        success: "#42B06C", warning: "#F0B44A", danger: "#F0705C" },
+      chart: ["#E8452C", "#F5A623", "#4C8DC4", "#2E9E5B", "#C2569C", "#7C6FD0", "#C98A3E"] },
+
+    { name: "金融专业", desc: "数据密集，稳健可信，方正紧凑",
+      opts: { radius: 4, shadow: 1, density: 0, size_px: 12, font: 0, weight: 1 },
+      light: { primary: "#1B3A6B", primary_weak: "#E9EEF6", accent: "#A8802B", ring: "#1B3A6B",
+        bg_page: "#FFFFFF", bg_surface: "#F8F9FB", bg_elevated: "#FFFFFF", bg_sunken: "#EFF2F6", border: "#DEE3EB",
+        text_primary: "#151C29", text_secondary: "#4A5567", text_muted: "#6B7789",
+        success: "#1D7A4A", warning: "#A87A08", danger: "#B93A2E" },
+      dark: { primary: "#5580C0", primary_weak: "#14213A", accent: "#C29A47", ring: "#5580C0",
+        bg_page: "#0D1119", bg_surface: "#141A24", bg_elevated: "#19202C", bg_sunken: "#090C12", border: "#252E3C",
+        text_primary: "#E8ECF3", text_secondary: "#A1AEC0", text_muted: "#7C889A",
+        success: "#3CA96E", warning: "#CE9F3C", danger: "#DC6656" },
+      chart: ["#1B3A6B", "#A8802B", "#3C7A9E", "#1D7A4A", "#8C5B8E", "#B5613C", "#5E6B7E"] },
+
+    { name: "医疗健康", desc: "洁净平静，易读优先，留白舒展",
+      opts: { radius: 10, shadow: 1, density: 3, size_px: 14, font: 0, weight: 1 },
+      light: { primary: "#0E7C94", primary_weak: "#E4F3F6", accent: "#4C8DE0", ring: "#0E7C94",
+        bg_page: "#FFFFFF", bg_surface: "#F6FAFB", bg_elevated: "#FFFFFF", bg_sunken: "#ECF3F5", border: "#DAE7EA",
+        text_primary: "#152A30", text_secondary: "#4A5F66", text_muted: "#657A81",
+        success: "#1E8F63", warning: "#B5820A", danger: "#C74438" },
+      dark: { primary: "#35A8C0", primary_weak: "#0E2A31", accent: "#7AABE8", ring: "#35A8C0",
+        bg_page: "#0C1417", bg_surface: "#141F23", bg_elevated: "#19262B", bg_sunken: "#080F11", border: "#243539",
+        text_primary: "#E8F1F3", text_secondary: "#A2B7BC", text_muted: "#7C9097",
+        success: "#37B07C", warning: "#D4A33C", danger: "#E06A5C" },
+      chart: ["#0E7C94", "#4C8DE0", "#1E8F63", "#C08040", "#9B6FC4", "#C2678A", "#5A9EA8"] },
+  ];
+  // 每个 token 标注作用位置（会议：每个属性都要可解释、与组件配套）
+  // 每项：[token, 名称, 用在哪（说白话）, 对应 CSS 变量, 示意图类型]
+  // 命名与说明面向前端开发：标出 CSS 变量名，配置面的每一行都能直接对上代码里的值
+  const COLOR_GROUPS = [
+    ["主色与交互", [
+      ["primary", "主色", "按钮填充、被选中的选项、滑杆已选段", "--primary", "btn"],
+      ["primary_weak", "选中背景", "选中项的浅色底，主色的 8% 版本", "--primary-weak", "optsel"],
+      ["accent", "悬停高亮", "鼠标移到选项上时的描边与文字色", "--brand-accent", "opthover"],
+      ["ring", "聚焦描边", "输入框获得焦点时的描边与光晕", "--brand-ring", "focus"],
+    ]],
+    ["背景与边框", [
+      ["bg_page", "对话区背景", "组件外面那层对话流的底色", "--bg-page", "page"],
+      ["bg_elevated", "卡片背景", "组件白卡本身的底色", "--bg-elevated", "card"],
+      ["bg_surface", "输入框背景", "输入框、摘要块等内嵌区域的底", "--bg-surface", "input"],
+      ["border", "边框", "卡片与选项的描边", "--border", "border"],
+    ]],
+    ["文字", [
+      ["text_primary", "主文字", "标题、选项文字、指标数值", "--text-primary", "t1"],
+      ["text_secondary", "次要文字", "描述、补充说明", "--text-secondary", "t2"],
+      ["text_muted", "弱化文字", "时间戳、占位符、单位", "--text-muted", "t3"],
+    ]],
+    ["状态", [
+      ["success", "成功", "提交成功、上涨、已上线", "--success", "chip"],
+      ["warning", "警告", "需要注意但不阻断的提示", "--warning", "chip"],
+      ["danger", "警示色", "确认执行、校验失败、下跌", "--danger", "chip"],
+    ]],
+    ["选项与按钮", [
+      ["opt_bg", "选项背景", "选项行的底色，留空同卡片底色", "--opt-bg", "optsel"],
+      ["opt_bc", "选项边框", "选项行的描边，留空用上方边框色", "--opt-bc", "border"],
+      ["btn_bg", "按钮背景", "提交 / 确认按钮的填充色；留空时用主色", "--btn-bg", "btn"],
+      ["btn_fg", "按钮文字", "留空时按底色亮度自动取白或近黑", "--btn-fg", "btnfg"],
+    ]],
+  ];
+  // 「用在哪」的实物示意：直接用该颜色画出它作用的真实元素
+  function tokenDemo(kind, color, cur) {
+    const box = (kids, style) => el("span", { class: "tok-demo", style: style || "" }, kids);
+    const bg = cur.bg_elevated || "#FFFFFF", bd = cur.border || "#E4E9F0", tx = cur.text_primary || "#1C2434";
+    switch (kind) {
+      case "btn": return box([el("i", { style: `background:${color};width:30px;height:13px;border-radius:4px` })], `background:${bg}`);
+      case "btnfg": return box([el("i", { style: `background:${cur.btn_bg || cur.primary};width:30px;height:13px;border-radius:4px;position:relative` },
+        [el("b", { style: `position:absolute;left:5px;top:4px;width:14px;height:4px;border-radius:2px;background:${color}` })])], `background:${bg}`);
+      case "optsel": return box([el("i", { style: `background:${color};border:1px solid ${cur.primary};width:34px;height:13px;border-radius:4px` })], `background:${bg}`);
+      case "opthover": return box([el("i", { style: `background:${bg};border:1.5px solid ${color};width:34px;height:13px;border-radius:4px` })], `background:${bg}`);
+      case "focus": return box([el("i", { style: `background:${bg};border:1.5px solid ${color};box-shadow:0 0 0 2.5px ${color}33;width:30px;height:12px;border-radius:3px` })], `background:${bg}`);
+      case "page": return box([el("i", { style: `background:${bg};border:1px solid ${bd};width:26px;height:13px;border-radius:3px` })], `background:${color}`);
+      case "card": return box([el("i", { style: `background:${color};border:1px solid ${bd};width:30px;height:14px;border-radius:4px` })], `background:${cur.bg_page || "#fff"}`);
+      case "input": return box([el("i", { style: `background:${color};border:1px solid ${bd};width:30px;height:12px;border-radius:3px` })], `background:${bg}`);
+      case "border": return box([el("i", { style: `background:transparent;border:1.5px solid ${color};width:30px;height:14px;border-radius:4px` })], `background:${bg}`);
+      case "t1": return box([el("i", { style: `background:${color};width:26px;height:5px;border-radius:2px` })], `background:${bg}`);
+      case "t2": return box([el("i", { style: `background:${color};width:22px;height:4px;border-radius:2px` })], `background:${bg}`);
+      case "t3": return box([el("i", { style: `background:${color};width:16px;height:3.5px;border-radius:2px` })], `background:${bg}`);
+      case "chip": return box([el("i", { style: `background:${color}22;border:1px solid ${color};width:26px;height:12px;border-radius:999px;position:relative` },
+        [el("b", { style: `position:absolute;left:4px;top:4px;width:5px;height:5px;border-radius:50%;background:${color}` })])], `background:${bg}`);
+      default: return box([el("i", { style: `background:${color};width:26px;height:13px;border-radius:4px` })], `background:${bg}`);
+    }
+  }
+  // 每个字体带自己支持的字重档（宋体 / 楷体等系统字重少，黑体多）
+  const FONTS = [
+    ["苹方", '"PingFang SC", -apple-system, "Microsoft YaHei", sans-serif',
+      [["细", "300"], ["常规", "400"], ["中等", "500"], ["半粗", "600"]]],
+    ["冬青黑体", '"Hiragino Sans GB", "PingFang SC", sans-serif',
+      [["细", "300"], ["常规", "400"], ["半粗", "600"]]],
+    ["宋体", '"Songti SC", "STSong", "SimSun", serif', [["常规", "400"], ["加粗", "700"]]],
+    ["楷体", '"Kaiti SC", "STKaiti", "KaiTi", serif', [["常规", "400"]]],
+    ["圆体", '"Yuanti SC", "PingFang SC", sans-serif', [["常规", "400"], ["中等", "500"]]],
+    ["Menlo 等宽", 'Menlo, "SF Mono", Consolas, monospace', [["常规", "400"], ["加粗", "700"]]],
+  ];
+  const curWeights = () => FONTS[opts.font][2];
+  const SIZES = [["12px", "12px"], ["13px", "13px"], ["14px", "14px"], ["15px", "15px"]];   // 兼容旧档位索引
+  const SHADOWS = [["无", "none"], ["轻", "0 1px 3px rgba(15,27,38,.08)"], ["中", "0 4px 12px rgba(15,27,38,.12)"], ["重", "0 8px 24px rgba(15,27,38,.18)"]];
+  // 滑杆上显示实际取值：只写「标准」「中」看不出到底是多少
+  const SHADOW_LABELS = [["无", "none"], ["轻 · 模糊 3px", ""], ["中 · 模糊 12px", ""], ["重 · 模糊 24px", ""]];
+  const DENSITIES = [["极紧凑", "tight", "10px"], ["紧凑", "compact", "13px"], ["标准", "regular", "16px"],
+                     ["宽松", "loose", "20px"], ["极宽松", "airy", "24px"]];
+  const DENSITY_LABELS = DENSITIES.map(([nm, , px]) => [`${nm} · ${px}`, px]);
+
+  const q0 = new URLSearchParams(location.search);
+  const RAD_STOPS = [[0, "直角"], [8, "轻微"], [16, "标准"], [22, "圆润"], [28, "全圆"]];
+  const radName = (px) => { let best = RAD_STOPS[0]; RAD_STOPS.forEach(s => { if (Math.abs(s[0] - px) < Math.abs(best[0] - px)) best = s; }); return Math.abs(best[0] - px) <= 2 ? best[1] : px + "px"; };
+  const _r0 = q0.get("r") != null ? Number(q0.get("r")) : 16;
+  const opts = { preset: Number(q0.get("c")) || 0, radius: _r0 <= 4 ? [2, 8, 16, 22, 28][_r0] ?? 16 : _r0,
+    font: 0, weight: 1, size: 1, shadow: 1, density: 2 };
+  let editMode = "light";                 // 当前编辑的明暗模式
+  // token 状态：明暗两套 + 图表序列（预设整套填充；之后任意 token 可单独细调）
+  let tok = null;
+  function loadPreset(i, withShape = true) {
+    const pz = THEME_PRESETS[i];
+    tok = { light: { ...pz.light }, dark: { ...pz.dark }, chart: [...pz.chart] };
+    // 风格不只是配色：圆角、阴影、密度、字号一起切过去，否则选了「自然清新」还是方正紧凑的样子
+    if (withShape && pz.opts) Object.assign(opts, pz.opts);
+  }
+  loadPreset(opts.preset);
+  let baseTokens = null;
+
+  function buildTokens() {
+    const t = JSON.parse(JSON.stringify(baseTokens));
+    const rc = Math.max(0, Math.min(28, Number(opts.radius) || 0));
+    const rk = Math.max(2, Math.round(rc * 0.75));
+    t.color = { ...t.color, ...tok.light };
+    t.color_dark = { ...tok.dark };       // 明暗双份：SDK 出包与预览按模式取
+    t.radius = { ...(t.radius || {}), card: rc + "px", control: rk + "px", chip: "999px" };
+    const ws = curWeights();
+    const wi = Math.min(opts.weight, ws.length - 1);
+    const sizePx = typeof opts.size_px === "number" ? opts.size_px : Number((SIZES[opts.size] || SIZES[1])[1]);
+    // 整套字号按正文字号派生：只改 base 会让说明文字、标题、大数字原地不动，
+    // 预览上看起来就是「部分组件不跟随」
+    t.font = { ...(t.font || {}), family: FONTS[opts.font][1], weight_base: ws[wi][1],
+      size_base: sizePx + "px", size_small: (sizePx - 1) + "px",
+      size_title: (sizePx + 2) + "px", size_hero: (sizePx + 7) + "px" };
+    const shc = opts.shadow_custom;
+    t.shadow = shc ? `${shc.x}px ${shc.y}px ${shc.blur}px ${shc.spread}px rgba(15, 23, 42, ${(shc.alpha / 100).toFixed(2)})`
+                   : SHADOWS[opts.shadow][1];
+    t.density = DENSITIES[opts.density][1];
+    t.spacing = { ...(t.spacing || {}), card_padding: DENSITIES[opts.density][2] };
+    t._options && (t._options.density_scale = "v2");
+    t.chart = { ...(t.chart || {}), categorical: [...tok.chart, ...((t.chart || {}).categorical || []).slice(7)] };
+    t._options = { ...opts, radius_unit: "px", density_scale: "v2" };
+    return t;
+  }
+  function applyPreviewVars(host, t, dark) {
+    if (!host) return;
+    const c = dark ? { ...t.color, ...t.color_dark } : t.color;
+    const m = {
+      "--primary": c.primary, "--primary-weak": c.primary_weak, "--primary-hover": c.primary,
+      "--brand-accent": c.accent, "--brand-ring": c.ring,
+      "--bg-page": c.bg_page, "--bg-surface": c.bg_surface,
+      "--bg-elevated": c.bg_elevated || (dark ? c.bg_surface : "#FFFFFF"),
+      "--bg-sunken": c.bg_sunken || c.bg_page,
+      "--text-primary": c.text_primary, "--text-secondary": c.text_secondary, "--text-muted": c.text_muted,
+      "--border": c.border, "--border-strong": c.border,
+      "--success": c.success, "--warning": c.warning, "--danger": c.danger,
+      "--radius-card": t.radius.card, "--radius-control": t.radius.control,
+      "--font-family": t.font.family, "--font-base": t.font.size_base,
+      "--font-small": t.font.size_small, "--font-title": t.font.size_title,
+      "--font-hero": t.font.size_hero,
+      "--brand-shadow": t.shadow,
+      "--opt-bg": c.opt_bg, "--opt-bc": c.opt_bc, "--btn-bg": c.btn_bg, "--btn-fg": c.btn_fg,
+      // 图表的网格与轴色随明暗走，否则深色底上图表几乎看不见
+      "--chart-grid": c.border, "--chart-axis": c.text_muted,
+    };
+    const put = (elx) => Object.entries(m).forEach(([k, v]) => { if (v) elx.style.setProperty(k, v); });
+    put(host);
+    // 全局 .brand-scope 类规则优先于容器继承——变量必须直接落在每个 scope 元素上
+    host.querySelectorAll(".brand-scope").forEach(put);
+    host.style.background = c.bg_page || "";
+    host.style.borderRadius = "12px";
+    host.style.padding = "14px";
+  }
+  const applyPreview = () => {
+    try {
+      const t = buildTokens();
+      Brand.apply(t);   // 浅色 token 供全局（图表序列等）；明暗整体观感注入预览容器
+      renderDemos();
+      applyPreviewVars(document.getElementById("demoOne"), t, editMode === "dark");
+    } catch (e) {}
+  };
+
+  const nameIn = el("input", { type: "text", maxlength: "20", value: existing?.brand_name || "", placeholder: "例如：政务蓝" });
+  const nameErr = el("div", { class: "field-error" });
+  const normName = (x) => String(x || "").trim().toLowerCase().replace(/\s+/g, "");
+  const dupOf = (v) => brands.find(b2 => normName(b2.brand_name) === normName(v)
+    && (!existing || b2.brand_id !== existing.brand_id));
+  nameIn.oninput = () => {
+    const v = nameIn.value.trim();
+    const d = v ? dupOf(v) : null;
+    nameErr.textContent = d ? `已有同名主题「${d.brand_name}」，换个名字` : "";
+    nameIn.classList.toggle("invalid", !!d);
+  };
+  const err = el("div", { class: "field-error" });
+
+  // —— 预设选择（整套起步） ——
+  // 预设选择：默认只展示当前主题（克制），点「更换」展开全部；色块只摆主色系（不摆状态色，避免花绿）
+  const palGrid = el("div", {});
+  let palOpen = false;
+  function presetSwatch(pz) {
+    const c0 = editMode === "dark" ? pz.dark : pz.light;
+    return el("span", { style: "display:inline-flex;gap:4px" },
+      [c0.primary, c0.accent, c0.bg_surface].map(cx =>
+        el("i", { style: `width:18px;height:18px;border-radius:6px;border:1px solid var(--border);background:${cx}` })));
+  }
+  function drawPals() {
+    palGrid.innerHTML = "";
+    const cur = THEME_PRESETS[opts.preset];
+    if (!palOpen) {
+      palGrid.appendChild(el("div", { class: "preset-current" }, [
+        presetSwatch(cur),
+        el("span", { style: "font-weight:600" }, [cur.name]),
+        el("span", { class: "muted", style: "font-size:var(--font-caption)" }, [cur.desc || "当前主题预设"]),
+        el("div", { style: "flex:1" }),
+        el("button", { class: "btn small ghost", type: "button", onclick: () => { palOpen = true; drawPals(); } }, ["更换主题"]),
+      ]));
+      return;
+    }
+    const grid2 = el("div", { class: "preset-grid" });
+    THEME_PRESETS.forEach((pz, i) => {
+      grid2.appendChild(el("button", { type: "button",
+        class: "preset-card" + (opts.preset === i ? " on" : ""),
+        title: pz.name + "：" + (pz.desc || "") + "（应用整套配色与形态，之后可逐项微调）",
+        onclick: () => { opts.preset = i; loadPreset(i); palOpen = false;
+          syncShapeControls(); drawPals(); drawTokens(); drawQuick(); applyPreview(); } }, [
+        presetSwatch(pz),
+        el("span", { class: "preset-card-txt" }, [
+          el("span", { class: "preset-card-name" }, [pz.name]),
+          pz.desc ? el("span", { class: "preset-card-desc" }, [pz.desc]) : null,
+        ]),
+        opts.preset === i ? UI.icon("check", 14) : null,
+      ]));
+    });
+    palGrid.appendChild(grid2);
+    palGrid.appendChild(el("div", { style: "display:flex;justify-content:flex-end;margin-top:6px" }, [
+      el("button", { class: "btn small ghost", type: "button", onclick: () => { palOpen = false; drawPals(); } }, ["收起"]),
+    ]));
+  }
+  drawPals();
+
+  // —— 明暗模式 tab（编辑与预览联动） ——
+  const modeSeg = el("div", { class: "segmented" });
+  function drawModeSeg() {
+    modeSeg.innerHTML = "";
+    [["light", "浅色模式"], ["dark", "深色模式"]].forEach(([k, nm]) => modeSeg.appendChild(el("button", {
+      type: "button", class: "seg" + (editMode === k ? " active" : ""),
+      onclick: () => { editMode = k; drawModeSeg(); drawPals(); drawTokens(); drawQuick(); applyPreview(); } }, [nm])));
+  }
+  drawModeSeg();
+
+  // —— 逐 token 细颗粒度编辑（Figma 式：分组 · 色块 + HEX 双向同步） ——
+  // HEX 与 HSL 互转：深色模式自动推导用
+  const hex2hsl = (hx) => {
+    const n = parseInt(hx.slice(1), 16);
+    const r = (n >> 16 & 255) / 255, g = (n >> 8 & 255) / 255, b2 = (n & 255) / 255;
+    const mx = Math.max(r, g, b2), mn = Math.min(r, g, b2), d = mx - mn;
+    let h = 0;
+    if (d) h = mx === r ? ((g - b2) / d + (g < b2 ? 6 : 0)) : mx === g ? (b2 - r) / d + 2 : (r - g) / d + 4;
+    return [h * 60, mx + mn === 0 || mx + mn === 2 ? 0 : d / (1 - Math.abs(mx + mn - 1)), (mx + mn) / 2];
+  };
+  const hsl2hex = (h, s2, l) => {
+    const a = s2 * Math.min(l, 1 - l);
+    const f = (n2) => { const k = (n2 + h / 30) % 12; const c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+      return Math.round(c * 255).toString(16).padStart(2, "0"); };
+    return "#" + f(0) + f(8) + f(4);
+  };
+  // 快速配色：调一套主题最先要动的那几个色——主题色 / 正文色 / 对话区底 / 组件卡底。
+  // 警示色不在这里：它承载的是语义（确认执行、校验失败、下跌）而不是品牌，
+  // 各套主题的主色从蓝到紫都有，警示色却清一色是红——它跟着语义走，放进「高级配色 - 状态」里
+  const quickPanel = el("div", { class: "quick-colors" });
+  function drawQuick() {
+    quickPanel.innerHTML = "";
+    [["primary", "主题色"], ["text_primary", "文字颜色"], ["bg_page", "背景色"],
+     ["bg_elevated", "组件底色"]].forEach(([key, label]) => {
+      const cur = tok[editMode];
+      const ci = el("input", { type: "color", class: "tok-chip",
+        value: /^#[0-9a-f]{6}$/i.test(cur[key] || "") ? cur[key] : "#3E63DD" });
+      ci.oninput = () => {
+        cur[key] = ci.value;
+        if (key === "bg_elevated") {
+          // 卡片底一变，内嵌区域（输入框、摘要块）跟着走一档，不然卡片深了输入框还浮着
+          const [h5, s5, l5] = hex2hsl(ci.value);
+          cur.bg_surface = hsl2hex(h5, s5, editMode === "light" ? Math.max(0, l5 - 0.03) : Math.min(1, l5 + 0.03));
+        }
+        if (key === "primary") {
+          cur.ring = ci.value;
+          // 选中底色联动：浅色调白，深色调暗——两个模式都要跟着主色走
+          if (editMode === "light") cur.primary_weak = "#" + ci.value.slice(1).replace(/../g,
+            m2 => Math.min(255, Math.round(parseInt(m2, 16) * 0.12 + 236)).toString(16).padStart(2, "0"));
+          else { const [h4, s4] = hex2hsl(ci.value); cur.primary_weak = hsl2hex(h4, Math.min(1, s4 * 0.6), 0.17); }
+        }
+        refreshGroupSwatches(); drawTokens(); applyPreview();
+      };
+      quickPanel.appendChild(el("label", { class: "quick-color" }, [ci, el("span", {}, [label])]));
+    });
+  }
+  const tokenPanel = el("div", {});
+  let grpRefreshers = [];
+  const refreshGroupSwatches = () => grpRefreshers.forEach(f => { try { f(); } catch (e) {} });
+  function drawTokens() {
+    tokenPanel.innerHTML = "";
+    grpRefreshers = [];
+    const cur = tok[editMode];
+    COLOR_GROUPS.forEach(([gname, items]) => {
+      const rows = el("div", { class: "tok-rows" });
+      const TOK_DEF = { bg_elevated: "#FFFFFF", bg_sunken: "#F2F3F5",
+        opt_bg: cur.bg_elevated || "#FFFFFF", opt_bc: cur.border || "#E4E9F0",
+        btn_bg: cur.primary || "#3E63DD", btn_fg: "#FFFFFF" };
+      items.forEach(([key, label, kdesc, cssVar, demoKind]) => {
+        const val = cur[key] || TOK_DEF[key] || "#000000";
+        const ci = el("input", { type: "color", value: /^#([0-9a-f]{6})$/i.test(val) ? val : "#000000", class: "tok-chip", title: label });
+        const hex = el("input", { type: "text", value: val, class: "tok-hex", spellcheck: "false", maxlength: "7" });
+        let demoHost = el("span", { class: "tok-demo-host" }, [tokenDemo(demoKind, val, { ...TOK_DEF, ...cur })]);
+        const redrawDemo = () => {
+          const fresh = tokenDemo(demoKind, cur[key] || TOK_DEF[key] || "#000000", { ...TOK_DEF, ...cur });
+          demoHost.innerHTML = ""; demoHost.appendChild(fresh);
+        };
+        ci.oninput = () => { cur[key] = ci.value; hex.value = ci.value; redrawDemo(); refreshGroupSwatches(); applyPreview(); };
+        hex.onchange = () => {
+          let v = hex.value.trim();
+          if (/^[0-9a-f]{6}$/i.test(v)) v = "#" + v;
+          if (/^#[0-9a-f]{6}$/i.test(v)) { cur[key] = v; ci.value = v; redrawDemo(); refreshGroupSwatches(); applyPreview(); }
+          else { hex.value = cur[key]; UI.toast("请输入合法 HEX 色值，如 #3E63DD", true); }
+        };
+        // 两行网格：上行 色块/名称/HEX/示意图，下行 变量名 + 用途说明（窄栏也不会挤成竖排）
+        rows.appendChild(el("div", { class: "tok-row" }, [
+          ci,
+          el("span", { class: "tok-name" }, [label]),
+          hex,
+          demoHost,
+          el("span", { class: "tok-desc" }, [
+            cssVar ? el("code", { class: "tok-var", title: "对应的 CSS 变量，可直接在代码中引用" }, [cssVar]) : null,
+            el("span", {}, [kdesc || ""]),
+          ]),
+        ]));
+      });
+      const swRow = el("span", { class: "tok-sum-sw" });
+      const refreshSw = () => {
+        swRow.innerHTML = "";
+        items.forEach(([key]) => swRow.appendChild(el("i", { style: "background:" + (cur[key] || TOK_DEF[key] || "#000") })));
+      };
+      refreshSw();
+      grpRefreshers.push(refreshSw);
+      // 这一组和组件样式改的是同一批变量，说清层级：这里定的是默认值
+      const gnote = gname === "选项与按钮"
+        ? el("div", { class: "tok-group-note" },
+            ["产品内所有组件的默认值；单个组件可在自己的「样式设计」里覆盖。"])
+        : null;
+      tokenPanel.appendChild(el("details", { class: "tok-group" }, [
+        el("summary", {}, [el("span", {}, [gname]), swRow]), gnote, rows]));
+    });
+    // 图表序列色（明暗共用）
+    const rows = el("div", { class: "tok-rows" });
+    tok.chart.forEach((cx, i) => {
+      const ci = el("input", { type: "color", value: cx, class: "tok-chip" });
+      const hex = el("input", { type: "text", value: cx, class: "tok-hex", spellcheck: "false", maxlength: "7" });
+      ci.oninput = () => { tok.chart[i] = ci.value; hex.value = ci.value; refreshGroupSwatches(); applyPreview(); };
+      hex.onchange = () => {
+        let v = hex.value.trim();
+        if (/^[0-9a-f]{6}$/i.test(v)) v = "#" + v;
+        if (/^#[0-9a-f]{6}$/i.test(v)) { tok.chart[i] = v; ci.value = v; applyPreview(); }
+        else hex.value = tok.chart[i];
+      };
+      rows.appendChild(el("div", { class: "tok-row" }, [ci,
+        el("span", { class: "tok-name" }, ["序列 " + (i + 1)]), el("span", { style: "flex:1" }), hex]));
+    });
+    const swRowC = el("span", { class: "tok-sum-sw" });
+    const refreshSwC = () => {
+      swRowC.innerHTML = "";
+      tok.chart.forEach(cx => swRowC.appendChild(el("i", { style: "background:" + cx })));
+    };
+    refreshSwC();
+    grpRefreshers.push(refreshSwC);
+    tokenPanel.appendChild(el("details", { class: "tok-group" }, [
+      el("summary", {}, [el("span", {}, ["图表序列色"]), swRowC]), rows]));
+  }
+  drawTokens();
+  drawQuick();
+  const _origDrawTokens = drawTokens;
+
+  // —— 圆角 / 字体 / 字重 / 字号 / 阴影 / 密度（沿用可视化控件） ——
+  // 圆角：连续滑块（0-28px）+ 档位刻度点按吸附 + 数值输入
+  const radRange = el("input", { type: "range", min: "0", max: "28", step: "1", value: String(opts.radius), class: "sl-range" });
+  const radNum = el("input", { type: "number", min: "0", max: "28", value: String(opts.radius), class: "sl-num num" });
+  const radNameEl = el("span", { class: "sl-lab" }, [radName(opts.radius)]);
+  const radFill = () => radRange.style.setProperty("--fill", (Number(radRange.value) / 28 * 100) + "%");
+  const setRad = (v) => {
+    opts.radius = Math.max(0, Math.min(28, Math.round(Number(v) || 0)));
+    radRange.value = String(opts.radius); radNum.value = String(opts.radius);
+    radNameEl.textContent = radName(opts.radius); radFill(); applyPreview();
+  };
+  radFill();
+  radRange.oninput = () => setRad(radRange.value);
+  radNum.onchange = () => setRad(radNum.value);
+  const radTicks = el("div", { class: "sl-stops" }, RAD_STOPS.map(([v, nm]) =>
+    el("button", { type: "button", class: "sl-stop", style: `left:${v / 28 * 100}%`, title: `${nm} ${v}px`,
+      onclick: () => setRad(v) })));
+  const radBox = el("div", { class: "sl-row" }, [
+    el("div", { class: "sl-wrap" }, [radRange, radTicks]), radNum,
+    el("span", { class: "muted", style: "font-size:var(--font-caption)" }, ["px"]), radNameEl]);
+  const syncRad = () => setRad(opts.radius);
+
+  // 通用档位滑块（阴影 / 紧凑度）
+  function stepSlider(labels, getIdx, setIdx) {
+    const lab = el("span", { class: "sl-lab" }, [labels[getIdx()][0]]);
+    const input = el("input", { type: "range", min: "0", max: String(labels.length - 1), step: "1",
+      value: String(getIdx()), class: "sl-range" });
+    const fill = () => input.style.setProperty("--fill", (Number(input.value) / (labels.length - 1) * 100) + "%");
+    fill();
+    input.oninput = () => { setIdx(Number(input.value)); lab.textContent = labels[Number(input.value)][0]; fill(); applyPreview(); };
+    const ticks = el("div", { class: "sl-stops" }, labels.map((x, i) =>
+      el("button", { type: "button", class: "sl-stop", style: `left:${i / (labels.length - 1) * 100}%`, title: x[0],
+        onclick: () => { setIdx(i); input.value = String(i); lab.textContent = x[0]; fill(); applyPreview(); } })));
+    const node = el("div", { class: "sl-row" }, [el("div", { class: "sl-wrap" }, [input, ticks]), lab]);
+    node._sync = () => { input.value = String(getIdx()); lab.textContent = labels[getIdx()][0]; fill(); };
+    return node;
+  }
+  const shadowSl = stepSlider(SHADOW_LABELS, () => opts.shadow, (i) => { opts.shadow = i; opts.shadow_custom = null; syncShadowCustom(); });
+  // Figma 式自定义阴影：X / Y / 模糊 / 扩散 / 不透明度（任一变更即覆盖档位）
+  opts.shadow_custom = opts.shadow_custom || null;
+  const shIn = {};
+  const shField = (key, label, min, max, val) => {
+    const inp = el("input", { type: "number", min: String(min), max: String(max), value: String(val), class: "num sh-num" });
+    shIn[key] = inp;
+    inp.onchange = () => { readShadowCustom(); applyPreview(); };
+    return el("label", { class: "sh-field" }, [el("span", {}, [label]), inp]);
+  };
+  const SH_LIMITS = { x: [-32, 32], y: [-32, 32], blur: [0, 80], spread: [-16, 16], alpha: [0, 80] };
+  function readShadowCustom() {
+    const g = (k, dv) => {
+      const [lo, hi] = SH_LIMITS[k];
+      const n = Number(shIn[k].value);
+      const v = Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n))) : dv;
+      shIn[k].value = String(v);
+      return v;
+    };
+    opts.shadow_custom = { x: g("x", 0), y: g("y", 4), blur: g("blur", 12), spread: g("spread", 0), alpha: g("alpha", 12) };
+  }
+  function syncShadowCustom() {
+    const c = opts.shadow_custom;
+    if (shIn.x) {
+      shIn.x.value = String(c ? c.x : 0); shIn.y.value = String(c ? c.y : 4);
+      shIn.blur.value = String(c ? c.blur : 12); shIn.spread.value = String(c ? c.spread : 0);
+      shIn.alpha.value = String(c ? c.alpha : 12);
+    }
+    shadowSl._sync && shadowSl._sync();
+  }
+  const shadowCustom = el("details", { class: "sh-custom" }, [
+    el("summary", {}, ["自定义阴影"]),
+    el("div", { class: "sh-grid" }, [
+      shField("x", "X", -32, 32, 0), shField("y", "Y", -32, 32, 4),
+      shField("blur", "模糊", 0, 80, 12), shField("spread", "扩散", -16, 16, 0),
+      shField("alpha", "不透明度 %", 0, 80, 12),
+    ]),
+  ]);
+  const densSl = stepSlider(DENSITY_LABELS, () => opts.density, (i) => opts.density = i);
+  const wBox = el("div", { class: "fs-cards" });
+  const sBox = el("div", { class: "fs-cards" });
+  if (opts.size_px === undefined) opts.size_px = Number((SIZES[opts.size] || SIZES[1])[1].replace("px", ""));
+  const szRange = el("input", { type: "range", min: "10", max: "18", step: "1", value: String(opts.size_px), class: "sl-range" });
+  const szNum = el("input", { type: "number", min: "10", max: "18", value: String(opts.size_px), class: "sl-num num" });
+  const szFill = () => szRange.style.setProperty("--fill", ((opts.size_px - 10) / 8 * 100) + "%");
+  const setSz = (v) => {
+    opts.size_px = Math.max(10, Math.min(18, Math.round(Number(v) || 13)));
+    szRange.value = String(opts.size_px); szNum.value = String(opts.size_px); szFill(); applyPreview();
+  };
+  szFill();
+  szRange.oninput = () => setSz(szRange.value);
+  szNum.onchange = () => setSz(szNum.value);
+  const sizeRow = el("div", { class: "sl-row" }, [el("div", { class: "sl-wrap" }, [szRange]), szNum,
+    el("span", { class: "muted", style: "font-size:var(--font-caption)" }, ["px"])]);
+  function drawFsCards() {
+    wBox.innerHTML = ""; sBox.innerHTML = "";
+    const ws = curWeights();
+    if (opts.weight >= ws.length) opts.weight = ws.length - 1;
+    ws.forEach(([nm, w], i) => wBox.appendChild(el("button", { type: "button",
+      class: "fs-card" + (opts.weight === i ? " on" : ""),
+      onclick: () => { opts.weight = i; drawFsCards(); applyPreview(); } }, [
+      el("span", { class: "fs-demo", style: `font-weight:${w};font-family:${FONTS[opts.font][1]}` }, ["永A"]),
+      el("span", { class: "fs-name" }, [nm]),
+    ])));
+    SIZES.forEach(([nm, sz], i) => sBox.appendChild(el("button", { type: "button",
+      class: "fs-card" + (opts.size === i ? " on" : ""),
+      onclick: () => { opts.size = i; drawFsCards(); applyPreview(); } }, [
+      el("span", { class: "fs-demo", style: `font-size:${sz}` }, ["永A"]),
+      el("span", { class: "fs-name" }, [nm]),
+    ])));
+  }
+  drawFsCards();
+  function drawSegs() { shadowSl._sync(); densSl._sync(); }
+  // 切换预设后，圆角 / 阴影 / 密度 / 字号这几个控件要跟着显示新值
+  function syncShapeControls() {
+    try {
+      radRange.value = String(opts.radius); radNum.value = String(opts.radius);
+      radNameEl.textContent = radName(opts.radius); radFill();
+      if (opts.size_px != null) setSz(opts.size_px);
+      drawSegs();
+      drawFsCards && drawFsCards();
+    } catch (e) { /* 控件尚未挂载时忽略 */ }
+  }
+
+  // 字体选择器：选项按各自字体族渲染；切换后字重档跟随该字体刷新
+  let fontSel = null;
+  function mountFontSel() {
+    fontSel = UI.fancySelect({ value: String(opts.font), width: "100%",
+      options: FONTS.map((f, i) => [String(i), f[0]]),
+      onChange: (v) => { opts.font = Number(v); drawFsCards(); applyPreview(); } });
+    return fontSel;
+  }
+  const editorGroup = (title, desc, children, extraClass = "") => el("section", {
+    class: "theme-editor-group selector-style-section" + (extraClass ? " " + extraClass : "")
+  }, [
+    el("div", { class: "theme-editor-group-head sty-group" }, [
+      el("div", { class: "theme-editor-group-title" }, [title]),
+      el("div", { class: "muted" }, [desc]),
+    ]),
+    ...children,
+  ]);
+  const presetField = el("div", { class: "field" }, [
+      el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:6px" }, [
+        el("span", { class: "label-text", style: "margin:0" }, ["主题预设"]),
+        el("div", { style: "flex:1" }),
+        modeSeg,
+      ]),
+      palGrid,
+    ]);
+  const quickField = el("div", { class: "field" }, [el("span", { class: "label-text" }, ["快速配色"]), quickPanel]);
+  const advancedField = el("div", { class: "field" }, [
+      el("details", { class: "adv-colors" }, [
+        el("summary", {}, ["高级配色"]),
+        el("div", { style: "padding-top:10px" }, [tokenPanel]),
+      ])]);
+  // 标签在左、变量名右对齐到行末，两端分居；说明单独一行，扫读时互不干扰
+  const fieldV = (label, cssVar, desc, ...ctrls) => el("div", { class: "field" }, [
+    el("span", { class: "label-text field-label-row" }, [
+      el("span", { class: "field-label-text" }, [label]),
+      cssVar ? el("code", { class: "tok-var", title: "对应的 CSS 变量，可直接在代码中引用" }, [cssVar]) : null,
+    ]),
+    desc ? el("span", { class: "field-desc" }, [desc]) : null,
+    ...ctrls,
+  ]);
+  const optPanel = el("div", { class: "theme-editor-sections" }, [
+    editorGroup("02 颜色与模式", "选择一套预设起步，再按需调整关键颜色。", [presetField, quickField, advancedField], "theme-color-group"),
+    editorGroup("03 组件外观", "统一控制组件的形状、层次与信息密度。", [
+      fieldV("圆角", "--radius-card", "卡片圆角，控件圆角按比例跟随", radBox),
+      fieldV("阴影", "--shadow-card", "组件卡片的投影层次", shadowSl, shadowCustom),
+      fieldV("卡片内边距", "--card-pad", "组件卡片四周的留白，同时带动卡片内部的行距节奏", densSl),
+    ]),
+    editorGroup("04 排版", "设置组件正文的字体、字重和字号。", [
+      fieldV("字体", "--font-family", "组件内所有文字的字体族", mountFontSel()),
+      fieldV("正文字重", "--font-weight-base", "组件正文的字重，可选档位随字体变化", wBox),
+      fieldV("正文字号", "--font-base", "其余字号按此派生：说明 -2px、标题 +2px、大数字 +7px", sizeRow),
+    ]),
+  ]);
+  // v2：风格主题只走选项定义（代码导入下线）
+  const modeTabs = el("div", {});
+
+  function close() {
+    host.hidden = true; host.innerHTML = "";
+    document.getElementById("editorCard").hidden = true;
+    document.getElementById("currentThemeCard").hidden = false;
+    window._editingStyle = false;
+    setHead("list");
+    document.getElementById("demoOne")?.removeAttribute("style");
+    Brand.load(previewFile).then(() => renderDemos()).catch(() => {});
+    onClose && onClose();
+  }
+  // 保存逻辑只有一份：顶部那组按钮直接调它，底部不再重复摆一组
+  async function doSave(btn) {
+    const name = nameIn.value.trim();
+    if (!name) { nameErr.textContent = "请填写主题名称"; nameIn.focus(); return; }
+    const dup = dupOf(name);
+    if (dup) {
+      nameErr.textContent = `已有同名主题「${dup.brand_name}」，换个名字`;
+      nameIn.classList.add("invalid");
+      nameIn.scrollIntoView({ block: "center", behavior: "smooth" });
+      nameIn.focus(); return;
+    }
+    const tokens = buildTokens();
+    tokens.brand_name = name;
+    // 新建一律生成新 id：baseTokens 克隆自当前预览品牌，其 brand_id（如 default）绝不能继承——否则覆盖既有风格
+    let bid = existing ? existing.brand_id : "brand-" + Math.random().toString(36).slice(2, 8);
+    if (!existing && brands.find(b => b.brand_id === bid)) bid = bid + "-" + Math.random().toString(36).slice(2, 5);
+    await UI.withBusy(btn, async () => {
+      try {
+        await UI.api("/api/brands", { method: "POST", body: { brand_id: bid, brand_name: name, tokens } });
+        brands = (await UI.api("/api/brands")).brands;
+        const saved = brands.find(b => b.brand_id === bid);
+        if (saved) previewFile = saved.file;
+        host.hidden = true; host.innerHTML = "";
+        document.getElementById("editorCard").hidden = true;
+        document.getElementById("currentThemeCard").hidden = false;
+        window._editingStyle = false;
+        setHead("list");
+        document.getElementById("demoOne")?.removeAttribute("style");
+        renderDemos(); renderCurrentThemeDetail(saved, tokens);
+        UI.emit("brands-changed", { file: (saved || {}).file });
+        UI.toast(existing ? "主题已更新" : "主题已创建，在「产品与接入」里配给产品即可生效");
+        onClose && onClose();
+      } catch (e2) {
+        const msg = e2.data?.error || e2.message;
+        if (e2.status === 409 || /同名/.test(msg)) {
+          nameErr.textContent = msg;
+          nameIn.classList.add("invalid");
+          nameIn.scrollIntoView({ block: "center", behavior: "smooth" });
+          nameIn.focus();
+        } else { err.textContent = msg; }
+      }
+    }, "保存中……");
+  }
+
+  host.innerHTML = "";
+  host.appendChild(el("div", { class: "style-ed" }, [
+    // 与「当前主题」卡片同一个头部结构：小标题 + 主体 + 右侧操作
+    el("div", { class: "theme-ed-head" }, [
+      el("div", { class: "theme-ed-heading" }, [
+        el("span", { class: "ds-side-section-title" }, [existing ? "编辑主题" : "新建主题"]),
+        el("strong", {}, [existing ? (existing.brand_name || existing.file) : "未命名主题"]),
+        el("span", { class: "muted" }, ["主题会作为产品内所有组件的默认样式"]),
+      ]),
+      el("div", { class: "theme-ed-actions-inline" }, [
+        el("button", { class: "btn small", type: "button", onclick: close }, ["取消"]),
+        el("button", { class: "btn small primary ed-save", type: "button",
+          onclick: (e) => doSave(e.currentTarget) }, [existing ? "保存修改" : "保存主题"]),
+      ]),
+    ]),
+    editorGroup("01 主题信息", "给主题一个便于识别的名称，保存后可分配给产品。", [
+      el("label", { class: "field theme-name-field" }, [el("span", { class: "label-text req" }, ["主题名称"]), nameIn, nameErr]),
+    ], "theme-identity-group"),
+    modeTabs, optPanel, err,
+  ]));
+  document.getElementById("currentThemeCard").hidden = true;
+  document.getElementById("editorCard").hidden = false;
+  host.hidden = false;
+  window._editingStyle = true;
+  setHead("edit", { existing, close, doSave });
+
+  // 初始化：取默认 token 作底；编辑时回填（有 _options 走选项模式，否则代码模式）
+  (async () => {
+    try { baseTokens = await (await fetch("./brand/" + (existing ? existing.file : "brand-tokens.default.json"))).json(); }
+    catch (e) { baseTokens = { color: {}, chart: {} }; }
+    if (existing && baseTokens.color) {
+      // 编辑已有风格：回填它的真实 token（不是预设默认值）
+      const KEYS = ["primary", "primary_weak", "accent", "ring", "bg_page", "bg_surface", "border",
+                    "text_primary", "text_secondary", "text_muted", "success", "warning", "danger"];
+      KEYS.forEach(k => { if (baseTokens.color[k]) tok.light[k] = baseTokens.color[k]; });
+      const dkSrc = baseTokens.color_dark || {};
+      KEYS.forEach(k => { if (dkSrc[k]) tok.dark[k] = dkSrc[k]; });
+      const cc = ((baseTokens.chart || {}).categorical || []).slice(0, 5);
+      cc.forEach((cx, i2) => { if (cx) tok.chart[i2] = cx; });
+      const oo = baseTokens._options || {};
+      if (oo.radius != null) opts.radius = oo.radius_unit === "px" ? oo.radius : [2, 8, 16, 22, 28][oo.radius] ?? 16;
+      if (oo.font != null) opts.font = Math.min(oo.font, FONTS.length - 1);
+      if (oo.weight != null) opts.weight = oo.weight;
+      if (oo.size != null) opts.size = oo.size;
+      if (oo.size_px != null) { opts.size_px = oo.size_px; }
+      else if (oo.size != null) { opts.size_px = Number((SIZES[oo.size] || SIZES[1])[1].replace("px", "")); }
+      setSz(opts.size_px);
+      if (oo.shadow != null) opts.shadow = oo.shadow;
+      if (oo.shadow_custom) { opts.shadow_custom = oo.shadow_custom; }
+      if (oo.density != null) opts.density = oo.density_scale === "v2" ? oo.density : ({ 0: 1, 1: 2, 2: 3 }[oo.density] ?? 2);
+      drawPals(); drawTokens(); drawQuick(); drawFsCards(); drawSegs();
+      syncShadowCustom();
+      syncRad();
+      fontSel && fontSel.setValue && fontSel.setValue(String(opts.font));
+    }
+    if (existing) {
+      try {
+        const t = await (await fetch("./brand/" + existing.file)).json();
+        if (t._options && t._options.palette !== undefined) {
+          Object.assign(opts, t._options);
+          if (t._options.radius_unit !== "px") opts.radius = [2, 8, 16, 22, 28][t._options.radius] ?? 16;
+          opts.font = Math.min(opts.font || 0, FONTS.length - 1);
+          drawPals(); drawFsCards(); drawSegs();
+          syncRad();
+          fontSel && fontSel.setValue && fontSel.setValue(String(opts.font));
+          applyPreview();
+        } else {
+          // 旧代码导入的风格：无选项快照，按默认选项进入编辑（保存后转为选项定义）
+          Brand.apply(t); renderDemos();
+        }
+      } catch (e) {}
+    } else { applyPreview(); setTimeout(applyPreview, 900); }
+  })();
+}
+
+// ---------- 风格预设 ----------
+
+
+// 页头两态：详情时只显示标题，编辑时显示「返回 + 在改哪套 + 取消/保存」
+function setHead(mode, ctx) {
+  const title = document.getElementById("brandHeadTitle");
+  const actions = document.getElementById("brandHeadActions");
+  const count = document.getElementById("brandCount");
+  const head = document.getElementById("brandHead");
+  if (mode === "edit") {
+    // 进编辑态时页头保持不动：标题一直是「风格主题」，取消 / 保存放在编辑卡片自己的头部。
+    // 页头跟着改标题会让人以为换了个页面，也把操作按钮甩到离编辑区很远的地方
+    head.classList.add("is-edit");
+    title.textContent = "风格主题";
+    title.className = "page-title";
+    const descE = document.getElementById("brandHeadDesc");
+    if (descE) descE.textContent = "定义一套视觉风格，绑定给产品后成为其组件的默认样式。";
+    count.textContent = "";
+    actions.innerHTML = "";
+    actions.classList.remove("theme-ed-actions");
+    head.querySelector(".ds-back")?.remove();
+  } else {
+    const descL = document.getElementById("brandHeadDesc");
+    if (descL) descL.textContent = "定义一套视觉风格，绑定给产品后成为其组件的默认样式。";
+    head.classList.remove("is-edit");
+    title.textContent = "风格主题";
+    title.className = "page-title";
+    count.textContent = "";
+    head.querySelector(".ds-back")?.remove();   // .btn 的 display 会盖掉 [hidden]，直接移除最稳
+    actions.innerHTML = "";
+    actions.classList.remove("theme-ed-actions");
+    // 新建入口已经收进「切换主题」下拉里的「新增主题」，页头不再重复放一个
+  }
+}
+
+const THEME_FONT_NAMES = ["苹方", "冬青黑体", "宋体", "楷体", "圆体", "Menlo 等宽"];
+const THEME_WEIGHT_NAMES = ["细", "常规", "中等", "半粗", "加粗"];
+const THEME_SHADOW_NAMES = ["无阴影", "轻阴影", "中阴影", "重阴影"];
+const THEME_DENSITY_NAMES = ["极紧凑", "紧凑", "标准", "宽松", "极宽松"];
+
+function themeSettingRow(label, value, sample) {
+  return el("div", { class: "theme-detail-row" }, [
+    el("span", { class: "theme-detail-label" }, [label]),
+    el("span", { class: "theme-detail-value" }, [sample || null, value]),
+  ]);
+}
+
+function themePaletteBlock(label, colors) {
+  const entries = [
+    ["主色", colors.primary], ["强调", colors.accent], ["页面", colors.bg_page],
+    ["卡片", colors.bg_elevated || colors.bg_surface], ["文字", colors.text_primary], ["边框", colors.border],
+  ];
+  return el("div", { class: "theme-palette-block" }, [
+    el("div", { class: "theme-palette-label" }, [label]),
+    el("div", { class: "theme-palette-strip" }, entries.map(([name, color]) =>
+      el("span", { class: "theme-palette-swatch", title: `${name} ${color || "未设置"}`,
+        style: `background:${color || "transparent"}` }))),
+  ]);
+}
+
+function renderCurrentThemeDetail(brand, tokens) {
+  const host = document.getElementById("currentThemeDetail");
+  if (!host) return;
+  brand = brand || brands.find(b => b.file === previewFile) || brands[0];
+  if (!brand || !tokens) {
+    host.innerHTML = "";
+    host.appendChild(el("div", { class: "muted", style: "font-size:var(--font-small)" }, ["暂无主题设置"]));
+    return;
+  }
+  const light = tokens.color || {};
+  const dark = tokens.color_dark || {};
+  const options = tokens._options || {};
+  const radius = tokens.radius || {};
+  const font = tokens.font || {};
+  const users = products.filter(p => p.brand_file === brand.file);
+  const densityFallback = { compact: "紧凑", regular: "标准", loose: "宽松" }[tokens.density] || "标准";
+  const densityIndex = options.density_scale === "v2" ? options.density : ({ 0: 1, 1: 2, 2: 3 }[options.density]);
+  const density = densityIndex != null ? (THEME_DENSITY_NAMES[densityIndex] || densityFallback) : densityFallback;
+  const fontName = options.font != null ? (THEME_FONT_NAMES[options.font] || "系统字体")
+    : (/Songti|SimSun|STSong/.test(font.family || "") ? "宋体" : /Menlo|monospace/.test(font.family || "") ? "Menlo 等宽" : "系统字体");
+  const fontSize = `${options.size_px || parseInt(font.size_base, 10) || 14}px`;
+  const weight = options.weight != null ? (THEME_WEIGHT_NAMES[options.weight] || "常规") : "常规";
+  const shadow = options.shadow_custom ? "自定义阴影"
+    : (options.shadow != null ? (THEME_SHADOW_NAMES[options.shadow] || "轻阴影") : (tokens.shadow ? "轻阴影" : "无阴影"));
+  const canEdit = brand.brand_id !== "default";
+  host.innerHTML = "";
+  // 主题名、操作按钮和使用情况是一个整体，装进同一个吸顶容器；
+  // 分成两个各自 sticky 的块，中间会留缝，下面的内容从缝里透出来
+  const stickyTop = el("div", { class: "theme-detail-sticky" });
+  host.appendChild(stickyTop);
+  // 主题名做成可切换的入口：点开就是全部主题，选谁就启用谁
+  const switchBtn = el("button", { class: "theme-switch", type: "button",
+    "aria-haspopup": "listbox", title: "切换主题" }, [
+    themeSwatch(tokens),
+    el("span", { class: "theme-switch-meta" }, [
+      el("strong", {}, [brand.brand_name || brand.file]),
+      el("span", { class: "muted" }, [brand.brand_id === "default" ? "平台默认主题" : "自定义主题"]),
+    ]),
+    UI.icon("chevron", 15),
+  ]);
+  switchBtn.onclick = () => openThemeSwitcher(switchBtn, brand);
+  stickyTop.appendChild(el("div", { class: "theme-detail-head" }, [
+    el("div", { class: "theme-detail-heading" }, [
+      el("span", { class: "ds-side-section-title" }, ["当前主题"]),
+      switchBtn,
+    ]),
+    canEdit ? el("button", {
+      class: "btn small theme-detail-edit", type: "button", title: "编辑当前主题",
+      onclick: () => brandDialog(brand),
+    }, ["编辑主题"]) : null,
+  ]));
+  if (users.length) stickyTop.appendChild(el("div", { class: "theme-detail-usage", title: users.map(p => p.name).join("、") }, [
+    UI.icon("box", 13), el("span", {}, [`已用于 ${users.length} 个产品`]),
+  ]));
+  host.append(
+    el("section", { class: "theme-detail-section" }, [
+      el("div", { class: "theme-detail-section-title" }, ["颜色模式"]),
+      themePaletteBlock("浅色", light),
+      themePaletteBlock("深色", Object.keys(dark).length ? dark : light),
+    ]),
+    el("section", { class: "theme-detail-section" }, [
+      el("div", { class: "theme-detail-section-title" }, ["组件外观"]),
+      themeSettingRow("卡片圆角", radius.card || `${options.radius ?? 16}px`, el("i", { class: "theme-radius-sample", style: `border-radius:${radius.card || `${options.radius ?? 16}px`}` })),
+      (() => { const rc = radius.control || `${Math.max(4, Math.round((options.radius ?? 16) * .6))}px`;
+        // 和卡片圆角一样给个示意方块，同一组里不能一个有一个没有
+        return themeSettingRow("控件圆角", rc,
+          el("i", { class: "theme-radius-sample", style: `border-radius:${rc}` })); })(),
+      themeSettingRow("阴影", shadow),
+      themeSettingRow("信息密度", density),
+    ]),
+    el("section", { class: "theme-detail-section" }, [
+      el("div", { class: "theme-detail-section-title" }, ["排版"]),
+      themeSettingRow("字体", fontName),
+      themeSettingRow("正文字号", fontSize),
+      themeSettingRow("正文字重", weight),
+    ]),
+  );
+}
+
+// 删除主题：默认主题不可删；用到它的产品会回落到默认主题，删除前把影响说清楚
+async function deleteBrand(brand, users) {
+  const used = (users || []).length
+    ? `\n\n有 ${users.length} 个产品在用它（${users.map(p => p.name).join("、")}），删除后这些产品回落到默认主题。`
+    : "";
+  const ok = await UI.confirm("删除主题",
+    `删除「${brand.brand_name || brand.file}」后不可恢复。${used}`, { okText: "删除", danger: true });
+  if (!ok) return;
+  try {
+    await UI.api("/api/brands/delete", { method: "POST", body: { file: brand.file } });
+    UI.toast("已删除主题");
+    const wasCurrent = brand.file === previewFile;
+    brands = (await UI.api("/api/brands")).brands;
+    // 删的不是当前这套，就不该顺手把当前主题也换掉
+    if (wasCurrent) {
+      const fallback = brands.find(b => b.brand_id === "default") || brands[0];
+      if (fallback) {
+        previewFile = fallback.file;
+        await UI.api("/api/brands/active", { method: "POST", body: { file: fallback.file } });
+        await Brand.load(fallback.file).catch(() => {});
+      }
+    }
+    refreshCurrentThemeDetail();
+    renderDemos();
+  } catch (e) { UI.toast(e.data?.error || e.message, true); }
+}
+
+// 主题色板缩略：主色 / 强调 / 卡片底色三格，一眼分得出哪套是哪套
+function swatchCols(tokens) {
+  const c = (tokens || {}).color || {};
+  return [c.primary || "#3E63DD", c.accent || c.primary || "#8E4EC6", c.bg_surface || "#FFFFFF"];
+}
+function themeSwatch(tokensOrCols) {
+  const cols = Array.isArray(tokensOrCols) ? tokensOrCols : swatchCols(tokensOrCols);
+  return el("span", { class: "theme-sw" }, cols.map(x => el("i", { style: `background:${x}` })));
+}
+// 主题文件统一走 Brand.tokensOf 的缓存：装主题与画色板读的是同一个文件，
+// 各自维护一份缓存等于还是要读两遍
+const _themeTokens = {};
+function themeTokensOf(file) {
+  return Brand.tokensOf(file).then(t => (_themeTokens[file] = t));
+}
+
+// 切换主题的下拉：列出全部主题，点哪个就启用哪个；底部常驻新增入口。
+// 自定义主题在行尾给删除；平台默认主题不可删。
+function openThemeSwitcher(anchor, current) {
+  document.querySelectorAll(".theme-pop").forEach(n => n.remove());
+  const pop = el("div", { class: "theme-pop np-pop", role: "listbox" }, [
+    el("div", { class: "np-pop-head" }, ["切换主题",
+      el("span", { class: "np-pop-count" }, [(brands || []).length + " 套"])]),
+  ]);
+  const list = el("div", { class: "np-list" });
+  pop.appendChild(list);
+  const close = () => pop.remove();
+
+  (brands || []).forEach(b => {
+    const on = b.file === current.file;
+    const usedBy = (products || []).filter(p => p.brand_file === b.file);
+    const isDefault = b.brand_id === "default";
+    const row = el("div", { class: "theme-row" + (on ? " on" : ""), role: "option",
+      "aria-selected": on ? "true" : "false" });
+    const pick = el("button", { class: "theme-row-main", type: "button",
+      title: on ? "当前正在使用" : "点击启用这套主题",
+      onclick: async () => {
+        close();
+        if (on) return;
+        previewFile = b.file;
+        await UI.api("/api/brands/active", { method: "POST", body: { file: b.file } });
+        await Brand.load(b.file).catch(() => {});
+        refreshCurrentThemeDetail(); renderDemos();
+        UI.toast(`已启用「${b.brand_name || b.file}」`);
+      } }, [
+      themeSwatch(b.swatch || swatchCols(_themeTokens[b.file])),
+      el("span", { class: "theme-row-meta" }, [
+        el("span", { class: "theme-row-name" }, [b.brand_name || b.file]),
+        el("span", { class: "theme-row-sub muted" }, [isDefault ? "平台默认主题"
+          : usedBy.length ? `${usedBy.length} 个产品在用` : "未被使用"]),
+      ]),
+      on ? el("span", { class: "theme-row-check" }, [UI.icon("check", 15)]) : null,
+    ]);
+    row.appendChild(pick);
+    // 平台默认主题是兜底，删掉就没有可回落的了
+    if (!isDefault) row.appendChild(el("button", { class: "theme-row-del", type: "button",
+      title: "删除这套主题", onclick: (e) => { e.stopPropagation(); close(); deleteBrand(b, usedBy); } },
+      [UI.icon("trash", 14)]));
+    // 列表没带色板时（旧接口）才回落到读文件，读一次就缓存住
+    if (!b.swatch && !_themeTokens[b.file]) {
+      themeTokensOf(b.file).then(t => {
+        const sw = row.querySelector(".theme-sw");
+        if (sw) sw.replaceWith(themeSwatch(t));
+      }).catch(() => {});
+    }
+    list.appendChild(row);
+  });
+
+  pop.appendChild(el("button", { class: "np-card np-new theme-new", type: "button",
+    onclick: () => { close(); brandDialog(null); } }, [
+    el("span", { class: "np-avatar", style: "width:30px;height:30px;background:var(--primary-weak);color:var(--primary)" }, ["+"]),
+    el("span", { class: "np-meta" }, [el("span", { class: "np-name", style: "color:var(--primary)" }, ["新增主题"])]),
+  ]));
+
+  document.body.appendChild(pop);
+  const r = anchor.getBoundingClientRect();
+  pop.style.left = (r.left + window.scrollX) + "px";
+  pop.style.top = (r.bottom + window.scrollY + 6) + "px";
+  setTimeout(() => {
+    const away = (e) => { if (!pop.contains(e.target) && !anchor.contains(e.target)) { close(); document.removeEventListener("click", away, true); } };
+    document.addEventListener("click", away, true);
+    const on = list.querySelector(".theme-row.on");
+    if (on) on.scrollIntoView({ block: "nearest" });
+  }, 0);
+}
+
+async function refreshCurrentThemeDetail() {
+  const brand = brands.find(b => b.file === previewFile) || brands[0];
+  if (!brand) return renderCurrentThemeDetail();
+  try {
+    const tokens = await themeTokensOf(brand.file);   // 走缓存，切来切去不重复读同一份文件
+    renderCurrentThemeDetail(brand, tokens);
+  } catch (e) { renderCurrentThemeDetail(brand, Brand.get()); }
+}
+
+// 初始化
+(async function init() {
+  await new Promise(r => { const t = setInterval(() => { if (Brand.get()) { clearInterval(t); r(); } }, 60); setTimeout(() => { clearInterval(t); r(); }, 2500); });
+  try { brands = (await UI.api("/api/brands")).brands; } catch (e) { brands = []; }
+  try { products = (await UI.api("/api/products")).products || []; } catch (e) { products = []; }
+  const activeTokens = Brand.get();
+  const activeBrand = brands.find(b => b.brand_id === activeTokens?.brand_id);
+  if (activeBrand) previewFile = activeBrand.file;
+  refreshCurrentThemeDetail();
+  setHead("list");          // 页头由 setHead 统一渲染
+  mountDemoControls();
+  renderDemos();
+  // 深链：?new=1 新建；?edit=<brand_file> 直接编辑指定主题（产品配置里点「编辑主题」过来）
+  const q1 = new URLSearchParams(location.search);
+  if (q1.get("new")) brandDialog(null);
+  else if (q1.get("edit")) {
+    const hit = (brands || []).find(b => b.file === q1.get("edit"));
+    if (hit) brandDialog(hit);
+    else UI.toast("没找到这个主题，可能已被删除", true);
+  }
+})();
+</script>
+<script>if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js").then(function(reg){reg.update();reg.addEventListener("updatefound",function(){var nw=reg.installing;if(!nw)return;nw.addEventListener("statechange",function(){if(nw.state==="installed"&&navigator.serviceWorker.controller)location.reload();});});}).catch(function(){});</script>
+</body>
+</html>

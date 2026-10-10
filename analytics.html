@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5.5' fill='%231DA1F2'/%3E%3Crect x='10.5' y='3.6' width='9.6' height='7.3' rx='2.7' fill='none' stroke='%23fff' stroke-width='1.5' opacity='0.75'/%3E%3Cpath d='M3.4 12a3.7 3.7 0 0 1 3.7-3.7h6a3.7 3.7 0 0 1 3.7 3.7v2.3a3.7 3.7 0 0 1-3.7 3.7H9.5l-3.1 2.6c-.55.46-1.3.07-1.3-.64v-2.4A3.7 3.7 0 0 1 3.4 14.3z' fill='%23fff'/%3E%3Ccircle cx='7.4' cy='13.1' r='1.05' fill='%231DA1F2'/%3E%3Ccircle cx='10.25' cy='13.1' r='1.05' fill='%231DA1F2'/%3E%3Ccircle cx='13.1' cy='13.1' r='1.05' fill='%231DA1F2'/%3E%3C/svg%3E">
+<title>数据分析 · 智能交互平台</title>
+<link rel="stylesheet" href="./shared.css?v=267b358b">
+<link rel="prefetch" href="./analytics.html"><link rel="prefetch" href="./audit.html"><link rel="prefetch" href="./cards.html"><link rel="prefetch" href="./design.html"><link rel="prefetch" href="./embed-demo.html"><link rel="prefetch" href="./index.html"><link rel="prefetch" href="./products.html">
+<style>
+  .an-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .an-kpi { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .an-kpi .k { font-size: var(--font-caption); color: var(--text-muted); display: flex; align-items: center; gap: 4px; }
+  .an-kpi .v { font-size: 26px; font-weight: 700; letter-spacing: -.02em; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .an-kpi .v small { font-size: 13px; font-weight: 500; color: var(--text-muted); margin-left: 3px; }
+  .an-kpi .s { font-size: var(--font-caption); color: var(--text-muted); margin-top: 2px; }
+  .an-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: stretch; }
+  .an-grid > div { display: flex; flex-direction: column; gap: 14px; }
+  .an-grid > div > .an-card { margin-bottom: 0; }
+  .an-grid { margin-bottom: 34px; }
+  .an-grid > div > .an-card:only-child { flex: 1; display: flex; flex-direction: column; }
+  .an-grid > div > .an-card:only-child > .fn-row:first-of-type { margin-top: auto; }
+  .an-grid > div > .an-card:only-child > .fn-row:last-of-type { margin-bottom: auto; }
+  @media (max-width: 1100px) { .an-grid { grid-template-columns: 1fr; } }
+  .an-card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 16px 18px; margin-bottom: 14px; }
+  /* tab 与筛选行吸顶：往下翻数据时还能随时换 tab、换时间范围 */
+  /* 页头本身也是 sticky（高约 79px），tab 行要停在它下面而不是被它盖住 */
+  /* tab 一行、筛选一行：三组控件挤一行会把 tab 文字压成两行 */
+  /* 贴着页头往下排，不再留一条多余的分隔线 */
+  .an-sticky { position: sticky; top: 79px; z-index: 39; display: flex; flex-direction: column;
+    background: var(--bg-page); padding: 0; margin: -10px 0 4px; }
+  .an-sticky #anTabs { margin-bottom: 0; }
+  .an-filterrow { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+  .an-sticky #rangeMount2 { flex: none; display: flex; align-items: center; gap: 8px; }
+  /* 切 tab 时新面板还没拿到数据，页面会先塌到一屏高再弹回去，看着就是一下抖动。
+     给面板留一屏的底，内容多了自然往下长，少了也不会把页面缩掉 */
+  .an-panel { min-height: calc(100vh - 240px); }
+  .an-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .an-head .t { font-weight: 700; font-size: 15px; }
+  .an-head .d { font-size: var(--font-caption); color: var(--text-muted); }
+  /* 漏斗：三段横条 + 转化率 */
+  .fn-row { display: flex; align-items: center; gap: 12px; padding: 7px 0; }
+  .fn-name { width: 68px; flex: none; font-size: var(--font-small); color: var(--text-secondary); }
+  .fn-track { flex: 1; height: 26px; background: var(--bg-sunken); border-radius: 7px; overflow: hidden; }
+  .fn-fill { height: 100%; border-radius: 7px; background: var(--primary); display: flex; align-items: center;
+    padding-left: 10px; color: #fff; font-size: var(--font-caption); font-weight: 600; min-width: 44px; }
+  .fn-fill.s2 { background: color-mix(in srgb, var(--primary) 72%, var(--bg-elevated)); }
+  .fn-fill.s3 { background: color-mix(in srgb, var(--primary) 48%, var(--bg-elevated)); color: var(--text-primary); }
+  .fn-rate { width: 76px; flex: none; text-align: right; font-size: var(--font-small); color: var(--text-muted);
+    font-variant-numeric: tabular-nums; }
+  .fn-drop { font-size: var(--font-caption); color: var(--text-muted); padding: 2px 0 2px 80px; }
+  /* 选项分布 */
+  .od-group { padding: 10px 0; border-top: 1px solid var(--border); }
+  .od-group:first-child { border-top: none; padding-top: 0; }
+  .od-title { font-size: var(--font-small); font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .od-row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+  .od-label { width: 116px; flex: none; font-size: var(--font-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .od-track { flex: 1; height: 16px; background: var(--bg-sunken); border-radius: 5px; overflow: hidden; }
+  .od-fill { height: 100%; background: var(--primary); border-radius: 5px; }
+  .od-fill.rec { background: var(--success); }
+  .od-pct { width: 74px; flex: none; text-align: right; font-size: var(--font-caption); color: var(--text-secondary);
+    font-variant-numeric: tabular-nums; }
+  .echo-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 4px 0 12px; }
+  .echo-heading h2 { margin: 0; font-size: 16px; }
+  .echo-heading span { color: var(--text-muted); font-size: var(--font-caption); }
+  .echo-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .echo-grid .an-card { margin-bottom: 0; min-width: 0; }
+  .echo-grid .od-label { width: 132px; }
+  /* 单组件分析的筛选行 */
+  /* 组件筛选并进吸顶行，不再单独占一条带边框的白色方块 */
+  #cardFilterMount { display: flex; align-items: center; gap: 8px; flex: none; }
+  #cardFilterMount .fl { font-size: var(--font-caption); color: var(--text-muted); white-space: nowrap; }
+  #rangeMount { display: flex; align-items: center; gap: 8px; flex: none; }
+  .an-range-custom { display: flex; align-items: center; gap: 6px; }
+  .an-range-custom input[type=date] { height: 32px; padding: 4px 8px; }
+  .an-inst-row { cursor: pointer; }
+  .an-inst-row:hover td { background: var(--bg-surface); }
+  .an-inst-row.on td { background: var(--primary-weak); }
+  .an-daily-table { max-height: 420px; overflow: auto; }
+  .an-daily-table thead th { position: sticky; top: 0; z-index: 1; background: var(--bg-elevated); }
+  .an-empty { color: var(--text-muted); font-size: var(--font-small); padding: 18px 0; text-align: center; }
+  .an-form-table td:last-child, .an-form-table th:last-child { text-align: right; }
+  .an-form-table .form-name { font-weight: 600; }
+  .an-legend { display: flex; gap: 14px; justify-content: center; margin-top: 6px; font-size: var(--font-caption); color: var(--text-secondary); }
+  .an-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+  .an-legend .s1 { background: var(--primary); }
+  .an-legend .s2 { background: color-mix(in srgb, var(--primary) 45%, var(--bg-elevated)); }
+  @media (max-width: 720px) {
+    .page-head { flex-wrap: wrap; align-items: flex-start !important; }
+    .page-head .page-title { width: 100%; }
+    #rangeMount { width: 100%; flex-wrap: wrap; }
+    .an-range-custom { width: 100%; }
+    .an-range-custom input[type=date] { flex: 1; min-width: 0; }
+    #anTabs { overflow-x: auto; }
+    .an-sticky { flex-wrap: wrap; row-gap: 8px; }
+    #anTabs .tab { flex: none; white-space: nowrap; }
+    .echo-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
+    .echo-grid .od-row { align-items: flex-start; flex-wrap: wrap; gap: 6px 8px; padding: 6px 0; }
+    .echo-grid .od-label { width: calc(100% - 82px); }
+    .echo-grid .od-track { flex-basis: 100%; order: 3; }
+  }
+</style>
+</head>
+<body class="has-side">
+<div class="page">
+  <div class="page-head" style="display:flex;align-items:center;gap:12px">
+    <div class="page-head-main">
+      <div class="page-title">数据分析</div>
+      <div class="page-desc">查看组件的曝光、提交与群体选择分布，下载表单原始数据。</div>
+    </div>
+    <div style="flex:1"></div>
+  </div>
+  <div class="an-sticky">
+    <div class="tabbar" id="anTabs"></div>
+    <div class="an-filterrow">
+      <span id="cardFilterMount"></span>
+      <div style="flex:1"></div>
+      <span id="rangeMount2"></span>
+    </div>
+  </div>
+  <div id="anOverall" class="an-panel"></div>
+  <div id="anSingle" class="an-panel" hidden></div>
+  <div id="anEcho" class="an-panel" hidden></div>
+  <div id="anForms" class="an-panel" hidden></div>
+</div>
+
+<script>window.SIA_PLATFORM="ia";</script>
+<script src="./mock_data.js?v=80b192ff"></script>
+<script src="./mock_api.js?v=1c833357"></script>
+<script src="./tokens.js?v=c64e4c82"></script>
+<script src="./ui.js?v=56bad845"></script>
+<script>
+UI.nav("analytics");
+const { el } = UI;
+
+const CT_CN = (ct) => UI.ctName(ct);
+const pct = (v) => v == null ? "-" : v + "%";
+
+function kpiCard(k, v, unit, sub, hint) {
+  return el("div", { class: "an-kpi" }, [
+    el("div", { class: "k" }, [k, hint ? UI.help(hint) : null]),
+    el("div", { class: "v" }, [String(v), unit ? el("small", {}, [unit]) : null]),
+    sub ? el("div", { class: "s" }, [sub]) : null,
+  ]);
+}
+
+function funnelCard(o) {
+  const f = o.funnel;
+  const max = Math.max(...f.map(x => x.value), 1);
+  const rows = [];
+  f.forEach((st, i) => {
+    rows.push(el("div", { class: "fn-row" }, [
+      el("div", { class: "fn-name" }, [st.step]),
+      el("div", { class: "fn-track" }, [
+        el("div", { class: "fn-fill s" + (i + 1), style: `width:${Math.max(6, st.value / max * 100)}%` },
+          [String(st.value)]),
+      ]),
+    ]));
+    if (i < f.length - 1) {
+      rows.push(el("div", { class: "fn-drop" }, [`↓ 流失率 ${pct(st.drop_rate)}`]));
+    }
+  });
+  return el("div", { class: "an-card" }, [
+    el("div", { class: "an-head" }, [el("span", { class: "t" }, ["使用漏斗"])]),
+    ...rows,
+  ]);
+}
+
+function trendCard(o) {
+  const t = o.trend || [];
+  if (!t.length) return el("div", { class: "an-card" }, [
+    el("div", { class: "an-head" }, [el("span", { class: "t" }, ["每日曝光与有效响应"])]),
+    el("div", { class: "an-empty" }, ["该时间范围内没有事件"])]);
+  return el("div", { class: "an-card" }, [
+    el("div", { class: "an-head" }, [el("span", { class: "t" }, ["每日曝光与有效响应"]),
+      el("span", { class: "d" }, [`${t[0].day} 至 ${t[t.length - 1].day}`])]),
+    (() => {
+      // UI.lineChart(container, opts)：先建容器再画
+      const host = el("div", { style: "min-height:150px" });
+      requestAnimationFrame(() => {
+        UI.lineChart(host, {
+          labels: t.map(x => x.day.slice(5)),
+          series: [{ name: "曝光", values: t.map(x => x.rendered) },
+                   { name: "有效响应", values: t.map(x => x.submitted) }],
+          width: Math.max(560, host.clientWidth), height: 150, valueLabels: false,
+        });
+      });
+      return host;
+    })(),
+    el("div", { class: "an-legend" }, [
+      el("span", {}, [el("i", { class: "lg-dot s1" }), "曝光"]),
+      el("span", {}, [el("i", { class: "lg-dot s2" }), "有效响应"]),
+    ]),
+  ]);
+}
+
+function dailyTable(o) {
+  const rows = [...(o.trend || [])].reverse();
+  return el("div", { class: "an-card" }, [
+    el("div", { class: "an-head" }, [
+      el("span", { class: "t" }, ["每日数据明细"]),
+      el("span", { class: "d" }, ["按日期倒序"]),
+    ]),
+    rows.length ? el("div", { class: "an-daily-table" }, [
+      el("table", { class: "data" }, [
+        el("thead", {}, [el("tr", {}, ["日期", "曝光", "有效响应"].map(h => el("th", {}, [h])))]),
+        el("tbody", {}, rows.map(r => el("tr", {}, [
+          el("td", {}, [r.day]),
+          el("td", { class: "num" }, [String(r.rendered)]),
+          el("td", { class: "num" }, [String(r.submitted)]),
+        ]))),
+      ]),
+    ]) : el("div", { class: "an-empty" }, ["该时间范围内没有分天数据"]),
+  ]);
+}
+
+function optionsCard(groups, echoMode = false) {
+  if (!groups.length) return el("div", { class: "an-card" }, [
+    el("div", { class: "an-head" }, [el("span", { class: "t" }, [echoMode ? "群体选择分布" : "用户选了什么"])]),
+    el("div", { class: "an-empty" }, [echoMode ? "当前范围内没有可统计的群体回显响应" : "还没有可统计的响应记录"])]);
+  return el("div", { class: "an-card" }, [
+    el("div", { class: "an-head" }, [el("span", { class: "t" }, [echoMode ? "群体选择分布" : "用户选了什么"]),
+      el("span", { class: "d" }, ["绿色是 AI 推荐项"])]),
+    ...groups.map(g => el("div", { class: "od-group" }, [
+      el("div", { class: "od-title" }, [g.card_name || CT_CN(g.component_type),
+        g.card_name ? el("span", { class: "chip gray" }, [CT_CN(g.component_type)]) : null,
+        el("span", { class: "muted", style: "font-weight:400" }, [`${g.total} 次有效响应`])]),
+      ...g.dist.map(d => el("div", { class: "od-row" }, [
+        el("div", { class: "od-label", title: d.label }, [d.label]),
+        el("div", { class: "od-track" }, [
+          el("div", { class: "od-fill" + (d.recommended ? " rec" : ""), style: `width:${Math.max(2, d.pct)}%` })]),
+        el("div", { class: "od-pct" }, [`${d.count} 次 · ${d.pct}%`]),
+      ])),
+    ])),
+  ]);
+}
+
+function instancesCard(rows) {
+  if (!rows.length) return el("div", { class: "an-card" }, [
+    el("div", { class: "an-head" }, [el("span", { class: "t" }, ["组件实例排行"])]),
+    el("div", { class: "an-empty" }, ["暂无可归属到实例的事件，需 SDK 回传 card_id"])]);
+  return el("div", { class: "an-card" }, [
+    el("div", { class: "an-head" }, [el("span", { class: "t" }, ["组件实例排行"]),
+      el("span", { class: "d" }, ["组件实例"])]),
+    el("div", { style: "overflow-x:auto" }, [
+      el("table", { class: "data" }, [
+        el("thead", {}, [el("tr", {}, ["实例", "组件类型", "状态", "曝光", "有效响应"].map(h => el("th", {}, [h])))]),
+        el("tbody", {}, rows.map(r => el("tr", {
+          class: "an-inst-row" + (r.card_id === pickState.card_id ? " on" : ""),
+          title: "查看这个实例的数据",
+          onclick: () => {
+            pickState.card_id = r.card_id;
+            loadSingle();
+          },
+        }, [
+          el("td", {}, [r.name]),
+          el("td", {}, [CT_CN(r.component_type)]),
+          el("td", {}, [el("span", { class: "chip " + (r.status === "published" ? "blue" : "gray") },
+            [{ published: "已上线", draft: "草稿", deleted: "已删除" }[r.status] || r.status])]),
+          el("td", { class: "num" }, [String(r.rendered)]),
+          el("td", { class: "num" }, [String(r.submitted)]),
+
+        ]))),
+      ]),
+    ]),
+  ]);
+}
+
+function instancesChart(rows) {
+  const host = el("div", { style: "min-height:160px" });
+  requestAnimationFrame(() => {
+    UI.barChart(host, {
+      categories: rows.map(r => r.name),
+      values: rows.map(r => r.rendered),
+      width: Math.max(560, host.clientWidth), height: 160,
+      unit: " 次",
+    });
+  });
+  return el("div", { class: "an-card" }, [
+    el("div", { class: "an-head" }, [
+      el("span", { class: "t" }, ["组件实例曝光排行"]),
+      el("span", { class: "d" }, ["数据来自组件实例排行"]),
+    ]),
+    host,
+  ]);
+}
+
+// ---------- 时间范围：预设 + 自定义起止 ----------
+const range = { days: 30, start: "", end: "" };
+const rangeQS = () => range.start || range.end
+  ? `start=${range.start}&end=${range.end}` : `days=${range.days}`;
+const rangeLabel = () => range.start || range.end
+  ? `${range.start || "最早"} 至 ${range.end || "今天"}` : `近 ${range.days} 天`;
+
+// 清除筛选：常驻一个小 × 占位，没筛选时是禁用态。
+// 做成条件显示的文字按钮会让它一出现就把整行往左推。
+function clearFilterBtn(active, onClear) {
+  return el("button", {
+    class: "an-clear" + (active ? " on" : ""), type: "button",
+    ...(active ? {} : { disabled: "" }),
+    title: active ? "清除筛选，回到全部组件" : "当前没有筛选条件",
+    onclick: () => { if (active) onClear(); },
+  }, ["清除筛选"]);
+}
+
+// 组件筛选：四个 tab 共用同一个控件，挂在吸顶行里，
+// 原来每个 tab 自己画一份，位置、文案、可选范围各不相同，换个 tab 筛选条件还会丢
+const cardFilter = { card_id: "" };
+
+// 当前产品下的组件：card_ids 与 product_ids 两种归属写法都认
+// 候选组件按当前 tab 收窄：群体回显只能筛出开了群体结果的，表单只能筛出表单组件。
+// 全都列出来的话，选了一个筛不出任何数据的组件，页面只会空着，看不出是没数据还是选错了
+const TAB_POOL = {
+  echo: (c) => !!c.echo_results,
+  forms: (c) => c.component_type === "form.structured",
+};
+function productCardPool(tab) {
+  const pid = currentProductId();
+  const product = (FILTERS.products || []).find(p => p.product_id === pid);
+  const ids = new Set((product || {}).card_ids || []);
+  const mine = (FILTERS.cards || []).filter(c => ids.has(c.card_id) || (c.product_ids || []).includes(pid));
+  const narrow = TAB_POOL[tab === undefined ? anTab : tab];
+  return narrow ? mine.filter(narrow) : mine;
+}
+
+function reloadActiveTab() {
+  ({ overall: loadOverall, single: loadSingle, echo: loadEcho, forms: loadForms }[anTab] || loadOverall)();
+}
+
+function renderCardFilter() {
+  const host = document.getElementById("cardFilterMount");
+  if (!host) return;
+  const pool = productCardPool();
+  // 切到更窄的 tab 时，原先选中的组件可能已经不在候选里，先清掉再画
+  if (cardFilter.card_id && !pool.some(c => c.card_id === cardFilter.card_id)) {
+    cardFilter.card_id = ""; syncFilterStates();
+  }
+  const allLabel = { echo: "全部开启回显的组件", forms: "全部表单" }[anTab] || "全部组件";
+  host.innerHTML = "";
+  host.appendChild(el("span", { class: "fl" }, ["组件筛选"]));
+  host.appendChild(UI.fancySelect({
+    value: cardFilter.card_id, width: "220px",
+    options: [["", pool.length ? allLabel : "暂无可筛选的组件"],
+      ...pool.map(c => [c.card_id, c.name, "ID " + String(c.card_id).slice(0, 8)])],
+    searchable: true, searchHint: "搜索组件名称或 ID",
+    onChange: (v) => { cardFilter.card_id = v; syncFilterStates(); renderCardFilter(); reloadActiveTab(); },
+  }));
+  host.appendChild(clearFilterBtn(!!cardFilter.card_id, () => {
+    cardFilter.card_id = ""; syncFilterStates(); renderCardFilter(); reloadActiveTab();
+  }));
+}
+
+// 各 tab 的取数逻辑仍读自己的 state，统一从共用筛选值同步过去
+function syncFilterStates() {
+  overallState.card_id = cardFilter.card_id;
+  pickState.card_id = cardFilter.card_id;
+  echoState.card_id = cardFilter.card_id;
+}
+
+// ---------- 模块一：整体交互情况 ----------
+const overallState = { card_id: "" };
+
+
+async function loadOverall() {
+  const box = document.getElementById("anOverall");
+  UI.loading(box);
+  if (overallState.card_id && !(FILTERS.cards || []).some(c => c.card_id === overallState.card_id)) {
+    overallState.card_id = "";
+  }
+  const cardQS = overallState.card_id ? `&card_id=${encodeURIComponent(overallState.card_id)}` : "";
+  const o = await UI.api(`/api/analytics/overview?${rangeQS()}${cardQS}`);
+  box.innerHTML = "";
+  const k = o.kpi;
+  if (!k.rendered) {
+    box.appendChild(el("div", { class: "an-card" }, [
+      el("div", { class: "empty-state" }, [
+        el("div", { class: "empty-title" }, ["这段时间还没有组件事件"]),
+        el("div", {}, ["组件产生曝光或提交后，数据会出现在这里。也可以放宽时间范围。"]),
+      ]),
+    ]));
+    return;
+  }
+  box.appendChild(el("div", { class: "an-kpis" }, [
+    kpiCard("曝光", k.rendered, "次", rangeLabel(), "组件在对话里出现的次数"),
+    kpiCard("有效响应", k.submitted, "次", "提交 · 赞踩 · 确认", "包括提交、赞踩和确认/取消操作"),
+    kpiCard("交互率", pct(k.interact_rate), "", `${o.funnel[1].value} 次有操作`, "曝光后有操作的比例"),
+  ]));
+  box.appendChild(trendCard(o));
+  box.appendChild(dailyTable(o));
+}
+
+// ---------- 模块二：单组件数据分析 ----------
+const pickState = { product: "", card_id: "" };
+let FILTERS = { products: [], component_types: [], cards: [] };
+
+
+async function loadSingle() {
+  const box = document.getElementById("anSingle");
+  UI.loading(box);
+  const current = FILTERS.products.find(p => p.product_id === pickState.product);
+  const allowedCards = new Set((current || {}).card_ids || []);
+  if (pickState.card_id && !allowedCards.has(pickState.card_id)) pickState.card_id = "";
+  const ins = await UI.api(
+    `/api/analytics/instances?${rangeQS()}&product=${pickState.product}`)
+    .catch(() => ({ rows: [] }));
+  const rows = pickState.card_id
+    ? (ins.rows || []).filter(r => r.card_id === pickState.card_id)
+    : (ins.rows || []);
+  box.innerHTML = "";
+  if (rows.length) box.appendChild(instancesChart(rows));
+  box.appendChild(instancesCard(rows));
+}
+
+// ---------- 模块三：群体回显 ----------
+const echoState = { card_id: "" };
+
+function currentProductId() {
+  const saved = localStorage.getItem("sia_product");
+  const current = FILTERS.products.find(p => p.product_id === saved) || FILTERS.products[0];
+  return current ? current.product_id : "";
+}
+
+function currentProductCards() {
+  const productId = currentProductId();
+  return FILTERS.cards.filter(c => (c.product_ids || []).includes(productId));
+}
+
+
+function mergeEchoGroups(groups) {
+  const merged = new Map();
+  (groups || []).forEach(g => {
+    // 群体回显的展示单元是组件实例。兼容旧接口按候选项集合拆组的数据，
+    // 同一 card_id 的所有回答必须合并到同一张分布卡片。
+    const key = g.card_id || `${g.component_type || ""}:${g.card_name || ""}`;
+    let item = merged.get(key);
+    if (!item) {
+      item = { ...g, total: 0, distMap: new Map() };
+      merged.set(key, item);
+    }
+    item.total += Number(g.total || 0);
+    (g.dist || []).forEach(d => {
+      const label = String(d.label);
+      const current = item.distMap.get(label) || { label, count: 0, recommended: false };
+      current.count += Number(d.count || 0);
+      current.recommended = current.recommended || Boolean(d.recommended);
+      item.distMap.set(label, current);
+    });
+  });
+  return [...merged.values()].map(item => {
+    item.dist = [...item.distMap.values()]
+      .map(d => ({ ...d, pct: item.total ? Math.round(d.count / item.total * 1000) / 10 : 0 }))
+      .sort((a, b) => item.component_type === "scale.likert"
+        ? Number(b.label) - Number(a.label) : b.count - a.count);
+    delete item.distMap;
+    return item;
+  }).sort((a, b) => b.total - a.total);
+}
+
+function echoSummary(groups) {
+  const rows = mergeEchoGroups(groups);
+  const responses = rows.reduce((sum, g) => sum + Number(g.total || 0), 0);
+  const topChoices = rows.reduce((sum, g) =>
+    sum + Math.max(0, ...(g.dist || []).map(d => Number(d.count || 0))), 0);
+  const consensus = responses ? Math.round(topChoices / responses * 1000) / 10 : 0;
+  const options = rows.reduce((sum, g) => sum + (g.dist || []).length, 0);
+  const types = new Set(rows.map(g => g.component_type).filter(Boolean)).size;
+  return el("div", { class: "an-kpis" }, [
+    kpiCard("参与组件实例", rows.length, "个", `覆盖 ${types} 类组件`, "当前产品中产生有效响应的组件实例"),
+    kpiCard("群体有效响应", responses, "次", rangeLabel(), "用于计算群体选择分布的有效回答总量"),
+    kpiCard("群体共识度", pct(consensus), "", "各实例最高频选项加权", "各实例最高频选择数占全部有效响应的比例"),
+    kpiCard("分布选项", options, "个", "按组件实例独立统计", "当前有用户选择记录的不同选项数量"),
+  ]);
+}
+
+function echoGroupMeta(g) {
+  if (g.component_type !== "scale.likert") return `${g.total} 次有效响应`;
+  const scoreTotal = (g.dist || []).reduce((sum, d) => sum + Number(d.label) * Number(d.count || 0), 0);
+  const average = g.total ? Math.round(scoreTotal / g.total * 10) / 10 : 0;
+  return `${g.total} 次有效响应 · 平均 ${average} 分`;
+}
+
+function echoDistribution(groups) {
+  groups = mergeEchoGroups(groups);
+  if (!groups.length) return el("div", { class: "an-card" }, [
+    el("div", { class: "an-head" }, [el("span", { class: "t" }, ["全体选择分布"])]),
+    el("div", { class: "an-empty" }, ["当前范围内还没有可统计的用户选择"])]);
+  return el("section", {}, [
+    el("div", { class: "echo-heading" }, [
+      el("h2", {}, ["全体选择分布"]),
+      el("span", {}, [`共 ${groups.length} 个组件 · 每个组件独立统计`]),
+    ]),
+    el("div", { class: "echo-grid" }, groups.map(g => el("div", { class: "an-card" }, [
+      el("div", { class: "an-head" }, [
+        el("span", { class: "t" }, [g.card_name || CT_CN(g.component_type)]),
+        el("span", { class: "chip gray" }, [CT_CN(g.component_type)]),
+        el("span", { class: "d" }, [echoGroupMeta(g)]),
+      ]),
+      ...g.dist.map(d => el("div", { class: "od-row" }, [
+        el("div", { class: "od-label", title: d.label },
+          [g.component_type === "scale.likert" ? `${d.label} 分` : d.label]),
+        el("div", { class: "od-track" }, [
+          el("div", { class: "od-fill" + (d.recommended ? " rec" : ""),
+            style: `width:${Math.max(2, d.pct)}%` })]),
+        el("div", { class: "od-pct" }, [`${d.count} 次 · ${d.pct}%`]),
+      ])),
+    ]))),
+  ]);
+}
+
+async function loadEcho() {
+  const box = document.getElementById("anEcho");
+  UI.loading(box);
+  const cardPool = currentProductCards();
+  if (echoState.card_id && !cardPool.some(c => c.card_id === echoState.card_id)) echoState.card_id = "";
+  const qs = `${rangeQS()}&product=${currentProductId()}&card_id=${echoState.card_id}`;
+  const options = await UI.api(`/api/analytics/options?${qs}&limit=100&group_by_card=true`)
+    .catch(() => ({ groups: [] }));
+  box.innerHTML = "";
+  box.appendChild(echoSummary(options.groups || []));
+  box.appendChild(echoDistribution(options.groups || []));
+}
+
+// ---------- 模块四：表单 ----------
+async function downloadFormData(form) {
+  const q = new URLSearchParams({ card_id: form.card_id });
+  if (range.start || range.end) {
+    if (range.start) q.set("start", range.start);
+    if (range.end) q.set("end", range.end);
+  } else {
+    q.set("days", String(range.days));
+  }
+  try {
+    const response = await fetch(`/api/export/responses.csv?${q}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${form.name || "表单数据"}-${range.start || range.days + "天"}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    UI.toast("表单数据已下载");
+  } catch (e) {
+    UI.toast("下载失败，请稍后重试", true);
+  }
+}
+
+async function loadForms() {
+  const box = document.getElementById("anForms");
+  UI.loading(box);
+  const productId = currentProductId();
+  const product = FILTERS.products.find(p => p.product_id === productId);
+  const productCardIds = new Set((product || {}).card_ids || []);
+  const forms = (FILTERS.all_cards || [])
+    .filter(c => productCardIds.has(c.card_id)
+      && c.component_type === "form.structured"
+      && c.status !== "deleted"
+      // 共用的组件筛选对表单一样生效，四个 tab 行为一致
+      && (!cardFilter.card_id || c.card_id === cardFilter.card_id))
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "zh-CN"));
+  const result = await UI.api(
+    `/api/analytics/instances?${rangeQS()}&product=${productId}&ct=form.structured&limit=100`)
+    .catch(() => ({ rows: [] }));
+  const metrics = new Map((result.rows || []).map(r => [r.card_id, r]));
+  box.innerHTML = "";
+  box.appendChild(el("div", { class: "an-card" }, [
+    el("div", { class: "an-head" }, [
+      el("span", { class: "t" }, ["表单列表"]),
+      el("span", { class: "d" }, [`共 ${forms.length} 个表单 · ${rangeLabel()}`]),
+    ]),
+    forms.length ? el("div", { style: "overflow-x:auto" }, [
+      el("table", { class: "data an-form-table", "aria-label": "表单列表" }, [
+        el("thead", {}, [el("tr", {}, ["表单名称", "表单数", "操作"].map(h => el("th", {}, [h])))]),
+        el("tbody", {}, forms.map(form => {
+          const count = Number((metrics.get(form.card_id) || {}).submitted || 0);
+          return el("tr", {}, [
+            el("td", { class: "form-name" }, [form.name || "未命名表单"]),
+            el("td", { class: "num", title: "当前时间范围内的表单提交次数" }, [String(count)]),
+            el("td", {}, [el("button", {
+              class: "btn small ghost", type: "button",
+              title: `下载${rangeLabel()}的表单提交数据`,
+              onclick: () => downloadFormData(form),
+            }, ["下载数据"])]),
+          ]);
+        })),
+      ]),
+    ]) : el("div", { class: "empty-state" }, [
+      el("div", { class: "empty-title" }, ["当前产品还没有表单"]),
+      el("div", {}, ["创建表单组件后，这里显示名称与提交数量。"]),
+    ]),
+  ]));
+}
+
+// 四块内容用 tab 切换，一次只看一屏
+let anTab = "overall";
+function drawTabs() {
+  const bar = document.getElementById("anTabs");
+  bar.innerHTML = "";
+  [["overall", "整体交互情况"], ["single", "单组件数据分析"], ["echo", "群体回显"], ["forms", "表单"]].forEach(([k, nm]) => {
+    bar.appendChild(el("button", { class: "tab" + (anTab === k ? " active" : ""), type: "button",
+      onclick: () => { anTab = k; drawTabs(); renderCardFilter(); syncTab(); } }, [nm]));
+  });
+}
+// 切 tab 时新面板还没拿到数据，页面先塌下去再弹回来，看着就是抖一下。
+// 切换前把当前高度记在面板上当作底，新内容落位后再松开
+function holdPanelHeight(next) {
+  const cur = ["anOverall", "anSingle", "anEcho", "anForms"]
+    .map(id => document.getElementById(id)).find(n => n && !n.hidden);
+  const h = cur ? Math.round(cur.getBoundingClientRect().height) : 0;
+  if (!h || !next) return;
+  next.style.minHeight = h + "px";
+  const release = () => { next.style.minHeight = ""; };
+  // 内容一落位就松开；兜底 1.5 秒，免得接口不返回时高度一直被撑着
+  const mo = new MutationObserver(() => {
+    if (!next.querySelector(".loading, .skeleton") && next.children.length) {
+      mo.disconnect(); clearTimeout(t);
+      requestAnimationFrame(() => requestAnimationFrame(release));
+    }
+  });
+  mo.observe(next, { childList: true, subtree: true });
+  const t = setTimeout(() => { mo.disconnect(); release(); }, 1500);
+}
+
+function syncTab() {
+  const nextPanel = document.getElementById(
+    { overall: "anOverall", single: "anSingle", echo: "anEcho", forms: "anForms" }[anTab]);
+  if (nextPanel && nextPanel.hidden) holdPanelHeight(nextPanel);
+  document.getElementById("anOverall").hidden = anTab !== "overall";
+  document.getElementById("anSingle").hidden = anTab !== "single";
+  document.getElementById("anEcho").hidden = anTab !== "echo";
+  document.getElementById("anForms").hidden = anTab !== "forms";
+  if (anTab === "single" && !document.getElementById("anSingle").dataset.loaded) {
+    document.getElementById("anSingle").dataset.loaded = "1";
+    loadSingle();
+  }
+  if (anTab === "echo" && !document.getElementById("anEcho").dataset.loaded) {
+    document.getElementById("anEcho").dataset.loaded = "1";
+    loadEcho();
+  }
+  if (anTab === "forms" && !document.getElementById("anForms").dataset.loaded) {
+    document.getElementById("anForms").dataset.loaded = "1";
+    loadForms();
+  }
+}
+
+async function load() {
+  const [filters, productData, cardData] = await Promise.all([
+    UI.api("/api/analytics/filters").catch(() => FILTERS),
+    UI.api("/api/products").catch(() => ({ products: [] })),
+    UI.api("/api/cards").catch(() => ({ cards: [] })),
+  ]);
+  FILTERS = filters;
+  FILTERS.all_cards = cardData.cards || FILTERS.cards || [];
+  // 产品接口是产品归属的权威来源；兼容尚未重启、filters 里还没有 card_ids 的服务进程。
+  if ((productData.products || []).length) {
+    FILTERS.products = productData.products.map(p => ({
+      ...(FILTERS.products.find(x => x.product_id === p.product_id) || {}), ...p,
+    }));
+  }
+  const savedProduct = localStorage.getItem("sia_product");
+  const currentProduct = FILTERS.products.find(p => p.product_id === savedProduct) || FILTERS.products[0];
+  pickState.product = currentProduct ? currentProduct.product_id : "";
+  pickState.card_id = "";
+  drawTabs();
+  renderCardFilter();
+  await loadOverall();
+  document.getElementById("anSingle").dataset.loaded = "";
+  document.getElementById("anEcho").dataset.loaded = "";
+  document.getElementById("anForms").dataset.loaded = "";
+  syncTab();
+}
+
+// 时间范围：预设下拉 + 两个日期框常驻一行，改日期即按日期算
+(function mountRange() {
+  // 时间范围跟着 tab 一起吸顶：往下翻数据时也能直接改范围
+  const host = document.getElementById("rangeMount2");
+  const ymd = (d) => new Date(d).toISOString().slice(0, 10);
+  const sIn = el("input", { type: "date", "aria-label": "开始日期" });
+  const eIn = el("input", { type: "date", "aria-label": "结束日期" });
+  let preset = null;   // 预设下拉的实例，切日期时把它拨到「自定义」
+
+  const reload = () => {
+    document.getElementById("anSingle").dataset.loaded = "";
+    document.getElementById("anEcho").dataset.loaded = "";
+    document.getElementById("anForms").dataset.loaded = "";
+    load();
+  };
+  const fillPreset = (days) => {
+    eIn.value = ymd(Date.now());
+    sIn.value = ymd(Date.now() - (days - 1) * 86400e3);
+  };
+  const onDateChange = () => {
+    if (sIn.value && eIn.value && sIn.value > eIn.value) {
+      UI.toast("开始日期不能晚于结束日期", true); return;
+    }
+    range.start = sIn.value; range.end = eIn.value;
+    if (preset) preset.setValue("custom");
+    reload();
+  };
+  sIn.onchange = eIn.onchange = onDateChange;
+
+  preset = UI.fancySelect({
+    value: "30", width: "124px",
+    options: [["7", "近 7 天"], ["30", "近 30 天"], ["90", "近 90 天"], ["365", "近一年"], ["custom", "自定义"]],
+    onChange: (v) => {
+      if (v === "custom") return;              // 直接改日期框即可
+      range.start = range.end = ""; range.days = Number(v);
+      fillPreset(Number(v));
+      reload();
+    },
+  });
+  fillPreset(30);
+  host.append(preset, el("span", { class: "an-range-custom" }, [sIn, el("span", { class: "muted" }, ["至"]), eIn]));
+})();
+
+load().catch(e => UI.toast("加载失败：" + e.message, true));
+</script>
+<script>if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js").then(function(reg){reg.update();reg.addEventListener("updatefound",function(){var nw=reg.installing;if(!nw)return;nw.addEventListener("statechange",function(){if(nw.state==="installed"&&navigator.serviceWorker.controller)location.reload();});});}).catch(function(){});</script>
+</body>
+</html>

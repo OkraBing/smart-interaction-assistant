@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5.5' fill='%231DA1F2'/%3E%3Crect x='10.5' y='3.6' width='9.6' height='7.3' rx='2.7' fill='none' stroke='%23fff' stroke-width='1.5' opacity='0.75'/%3E%3Cpath d='M3.4 12a3.7 3.7 0 0 1 3.7-3.7h6a3.7 3.7 0 0 1 3.7 3.7v2.3a3.7 3.7 0 0 1-3.7 3.7H9.5l-3.1 2.6c-.55.46-1.3.07-1.3-.64v-2.4A3.7 3.7 0 0 1 3.4 14.3z' fill='%23fff'/%3E%3Ccircle cx='7.4' cy='13.1' r='1.05' fill='%231DA1F2'/%3E%3Ccircle cx='10.25' cy='13.1' r='1.05' fill='%231DA1F2'/%3E%3Ccircle cx='13.1' cy='13.1' r='1.05' fill='%231DA1F2'/%3E%3C/svg%3E">
+<title>产品与接入 · 智能交互平台</title>
+<link rel="stylesheet" href="./shared.css?v=267b358b">
+<link rel="prefetch" href="./analytics.html"><link rel="prefetch" href="./audit.html"><link rel="prefetch" href="./cards.html"><link rel="prefetch" href="./design.html"><link rel="prefetch" href="./embed-demo.html"><link rel="prefetch" href="./index.html"><link rel="prefetch" href="./products.html">
+</head>
+<body class="has-side">
+<div class="page">
+  <div class="page-head" style="display:flex;align-items:center;gap:12px">
+    <div class="page-head-main">
+      <div class="page-title">产品与接入</div>
+      <div class="page-desc">创建产品、绑定组件与风格主题，通过接入配置同步到你的产品。</div>
+    </div>
+    <div style="flex:1"></div>
+    <button class="btn primary" id="newBtn"></button>
+  </div>
+  <div id="listBox"></div>
+</div>
+
+<script>window.SIA_PLATFORM="ia";</script>
+<script src="./mock_data.js?v=80b192ff"></script>
+<script src="./mock_api.js?v=1c833357"></script>
+<script src="./tokens.js?v=c64e4c82"></script>
+<script src="./ui.js?v=56bad845"></script>
+<script>
+UI.nav("products");
+const { el } = UI;
+
+let brands = [], liveCards = [], allCards = [], products = [];
+
+function shortProductId(pid) {
+  const hex = String(pid).replace(/[^0-9a-f]/gi, "").slice(0, 8) || "0";
+  return String(parseInt(hex, 16) % 1000000).padStart(6, "0");
+}
+
+function brandName(file) {
+  const b = brands.find(x => x.file === file);
+  return b ? (b.brand_name || b.file) : file;
+}
+
+// 未上传产品图时使用稳定的示例图；按产品 ID 分配，不会在刷新时跳变。
+function sampleProductImage(p) {
+  const palettes = [
+    ["#3157D5", "#74A5FF"], ["#087E72", "#61C7B5"],
+    ["#6D45C6", "#C291FF"], ["#1677B8", "#62C7E8"],
+    ["#B85A32", "#F3AE67"],
+  ];
+  const seed = [...String(p.product_id)].reduce((n, ch) => n + ch.charCodeAt(0), 0);
+  const [from, to] = palettes[seed % palettes.length];
+  const initial = String(p.name || "产").trim().slice(0, 1);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${from}"/><stop offset="1" stop-color="${to}"/></linearGradient></defs>
+    <rect width="96" height="96" rx="22" fill="url(#g)"/>
+    <circle cx="76" cy="18" r="22" fill="#fff" opacity=".13"/><circle cx="17" cy="82" r="28" fill="#fff" opacity=".1"/>
+    <text x="48" y="60" text-anchor="middle" font-family="system-ui,sans-serif" font-size="38" font-weight="700" fill="#fff">${initial}</text>
+  </svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+
+// 数据块 Schema：产品与接入方之间的数据契约
+// params_schema 给模型当工具声明（模型据此生成调用参数）；submit_schema 是用户提交后的回传结构（agent 后端据此解析）
+async function viewSchemas(p) {
+  let reg;
+  try { reg = await UI.api(`/v1/products/${p.product_id}/registry?key=${p.mcp_key}`); }
+  catch (e) { UI.toast(e.data?.error || e.message, true); return; }
+  const comps = reg.components || [];
+  const blocks = comps.map(c => {
+    const pre1 = el("pre", { class: "schema-pre" }, [JSON.stringify(c.params_schema || {}, null, 2)]);
+    const kids = [
+      el("div", { style: "display:flex;align-items:center;gap:8px;flex-wrap:wrap" }, [
+        el("span", { style: "font-weight:600" }, [c.name || c.type]),
+        el("span", { class: "chip" }, [c.interactive ? "交互类" : "展示类"]),
+        el("span", { class: "cr-id num", style: "cursor:pointer", title: "点击复制组件实例 ID",
+          onclick: () => { navigator.clipboard.writeText(c.component_id); UI.toast("已复制组件实例 ID"); } }, [c.component_id]),
+      ]),
+      el("div", { class: "muted", style: "font-size:var(--font-caption);margin:6px 0 4px" }, ["params_schema · 模型调用参数（工具声明）"]),
+      pre1,
+    ];
+    if (c.submit_schema && Object.keys(c.submit_schema).length) {
+      kids.push(el("div", { class: "muted", style: "font-size:var(--font-caption);margin:8px 0 4px" }, ["submit_schema · 用户提交后的回传结构"]));
+      kids.push(el("pre", { class: "schema-pre" }, [JSON.stringify(c.submit_schema, null, 2)]));
+    }
+    return el("div", { style: "border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px" }, kids);
+  });
+  UI.modal(`数据块 Schema · ${p.name}`, el("div", { style: "max-height:64vh;overflow:auto" }, [
+    el("div", { class: "drawer-meta", style: "margin-bottom:10px" }, [
+      el("span", { class: "muted" }, [`注册表版本 ${reg.registry_version} · ${comps.length} 个组件实例`]),
+      el("div", { style: "flex:1" }),
+      el("button", { class: "btn small", onclick: () => { navigator.clipboard.writeText(JSON.stringify(reg, null, 2)); UI.toast("已复制完整注册表 JSON"); } }, [UI.icon("copy", 13), "复制完整注册表"]),
+    ]),
+    comps.length ? el("div", {}, blocks) : el("div", { class: "muted" }, ["尚未绑定组件，请在组件工作台新建并上线"]),
+  ]), null, { width: "640px" });
+}
+
+// 产品表单（新建与配置共用）：名称 / 可选图片 / 带颜色预览的风格主题
+function productForm(init, opts = {}) {
+  const st = { name: init.name || "", brand_file: init.brand_file || (brands[0] && brands[0].file) || "",
+    image: init.image || "", cardIds: new Set(init.card_ids || []) };
+  const nameIn = el("input", { type: "text", maxlength: "15", value: st.name, placeholder: "例如：官网智能客服（1-15 字）" });
+  const nameErr = el("div", { class: "field-error" });
+  nameIn.oninput = () => { st.name = nameIn.value; nameErr.textContent = ""; };
+
+  const imageInput = el("input", { type: "file", accept: "image/png,image/jpeg,image/webp", hidden: "" });
+  const imagePreview = el("div", { class: "product-image-preview" });
+  const uploadImage = el("button", { class: "btn small", type: "button", onclick: () => imageInput.click() },
+    [UI.icon("upload", 14), st.image ? "更换图片" : "上传图片"]);
+  const removeImage = el("button", { class: "btn small", type: "button", hidden: "",
+    onclick: () => { st.image = ""; drawImage(); } }, ["移除"]);
+  function drawImage() {
+    imagePreview.innerHTML = "";
+    imagePreview.appendChild(st.image
+      ? el("img", { src: st.image, alt: "产品图片预览" })
+      : el("span", { class: "product-image-empty" }, [UI.icon("upload", 20)]));
+    uploadImage.lastChild.textContent = st.image ? "更换图片" : "上传图片";
+    removeImage.hidden = !st.image;
+  }
+  imageInput.onchange = () => {
+    const file = imageInput.files && imageInput.files[0];
+    if (!file) return;
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type) || file.size > 5 * 1024 * 1024) {
+      UI.toast("请选择 5MB 以内的 PNG / JPG / WebP", true); imageInput.value = ""; return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, 512 / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        st.image = canvas.toDataURL("image/webp", .86);
+        drawImage(); imageInput.value = "";
+      };
+      img.onerror = () => UI.toast("图片读取失败", true);
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  };
+  drawImage();
+
+  const themeSwatch = el("span", { class: "theme-picker-swatch" });
+  const themeLabel = el("span", { class: "fsel-label" });
+  const themeBtn = el("button", { class: "fsel theme-picker", type: "button", style: "width:100%" }, [
+    themeSwatch, themeLabel, el("span", { class: "fsel-caret" }, [UI.icon("chevron", 13)])]);
+  const brandOf = file => brands.find(b => b.file === file) || { file, brand_name: file };
+  const paintTheme = async (file, swatch = themeSwatch) => {
+    const c = await UI.brandColorOf(file);
+    swatch.style.background = `linear-gradient(135deg, ${c.p} 0 50%, ${c.a} 50% 100%)`;
+  };
+  const selectTheme = file => {
+    st.brand_file = file;
+    themeLabel.textContent = brandOf(file).brand_name || file;
+    paintTheme(file);
+  };
+  selectTheme(st.brand_file);
+  themeBtn.onclick = () => {
+    document.querySelectorAll(".theme-picker-pop").forEach(n => n.remove());
+    const pop = el("div", { class: "menu-pop theme-picker-pop", role: "listbox" });
+    brands.forEach(b => {
+      const sw = el("span", { class: "theme-picker-swatch" });
+      paintTheme(b.file, sw);
+      pop.appendChild(el("button", { class: "menu-item" + (b.file === st.brand_file ? " on" : ""),
+        type: "button", role: "option", "aria-selected": b.file === st.brand_file ? "true" : "false",
+        onclick: () => { selectTheme(b.file); pop.remove(); } }, [sw, el("span", {}, [b.brand_name || b.file]),
+          b.file === st.brand_file ? el("span", { class: "theme-picker-check" }, [UI.icon("check", 14)]) : null]));
+    });
+    document.body.appendChild(pop);
+    const r = themeBtn.getBoundingClientRect();
+    pop.style.width = r.width + "px";
+    pop.style.left = Math.max(12, Math.min(r.left, innerWidth - r.width - 12)) + "px";
+    pop.style.top = Math.min(r.bottom + 5, innerHeight - pop.offsetHeight - 12) + "px";
+    const close = e => { if (!pop.contains(e.target) && !themeBtn.contains(e.target)) { pop.remove(); document.removeEventListener("click", close, true); } };
+    setTimeout(() => document.addEventListener("click", close, true), 0);
+  };
+  // 选完之后常见的下一步是「接着改这套主题」，给个直达入口，不用回主题页再找一遍
+  const editThemeBtn = el("button", { class: "btn small", type: "button",
+    title: "在风格主题页编辑当前这一套",
+    onclick: () => { location.href = "design.html?edit=" + encodeURIComponent(st.brand_file || ""); } },
+    [UI.icon("edit", 13), "编辑主题"]);
+  const node = el("div", { class: "policy-form" }, [
+    el("label", { class: "field" }, [el("span", { class: "label-text req" }, ["产品名称"]), nameIn, nameErr]),
+    el("div", { class: "field" }, [el("span", { class: "label-text" }, ["产品图片", el("span", { class: "muted optional-label" }, ["（选填）"])]),
+      el("div", { class: "product-image-field" }, [imagePreview,
+        el("div", { class: "product-image-actions" }, [
+          el("div", { class: "muted" }, ["正方形 PNG / JPG / WebP，5MB 以内"]),
+          el("div", { style: "display:flex;gap:8px" }, [uploadImage, removeImage]), imageInput]),
+      ])]),
+    el("div", { class: "field" }, [
+      el("span", { class: "label-text" }, ["风格主题",
+        UI.help("产品内所有组件的默认视觉，可随时更换或继续调整")]),
+      el("div", { class: "theme-field-row" }, [themeBtn, editThemeBtn]),
+      el("span", { class: "field-desc theme-field-desc" }, [
+        "产品内所有组件的默认视觉。"]),
+    ]),
+  ]);
+  return { node, st, nameIn, nameErr };
+}
+
+function configProduct(p) {
+  const form = productForm(p);
+  const err = el("div", { class: "field-error" });
+  const origin = location.origin;
+  const copy = async (text, label) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      UI.toast(`已复制${label}`);
+    } catch (e) { UI.toast("复制失败，请手动复制", true); }
+  };
+  const codeBlock = (step, title, hint, code) => el("div", { class: "access-step" }, [
+    el("span", { class: "access-step-no", "aria-hidden": "true" }, [String(step)]),
+    el("div", { class: "sdk-sec" }, [
+      el("div", { class: "sdk-sec-head" }, [
+        el("div", { class: "access-step-copy" }, [
+          el("span", { class: "sdk-sec-title" }, [title]),
+          el("span", { class: "muted" }, [hint]),
+        ]),
+        el("div", { style: "flex:1" }),
+        el("button", { class: "btn small", type: "button", title: `复制${title}`,
+          onclick: () => copy(code, title) }, [UI.icon("copy", 13), "复制"]),
+      ]),
+      el("pre", { class: "sdk-code num" }, [code]),
+    ]),
+  ]);
+  const registry = `GET ${origin}/v1/products/${p.product_id}/registry?key=${p.mcp_key}`;
+  const frontend = `<script src="https://platform.example.com/loader.js"><\/script>\n\n<script>\n  PlatformWidget.mount("#container", {\n    agentId: "${p.product_id}",\n    token: "short-lived-token"\n  });\n<\/script>`;
+  const access = el("div", { class: "field access-config product-access-config" }, [
+    el("div", { class: "access-intro" }, [
+      el("div", { class: "access-intro-title" }, ["接入配置"]),
+      el("div", { class: "muted" }, ["两步接入：后端拉取组件注册表，前端 Loader 负责渲染与数据回传。"]),
+    ]),
+    codeBlock(1, "后端 API", "Agent 服务端拉取，作为工具声明", registry),
+    codeBlock(2, "前端 Loader", "粘贴到业务页面的 HTML 中", frontend),
+  ]);
+  const foot = el("div", { style: "display:flex;gap:8px;justify-content:flex-end;align-items:center;width:100%" }, [
+    err, el("div", { style: "flex:1" }),
+    el("button", { class: "btn", onclick: () => mask.querySelector(".close-btn")?.click() }, ["取消"]),
+    el("button", { class: "btn primary", onclick: async (e) => {
+      if (!form.st.name.trim()) { form.nameErr.textContent = "产品名称必填"; form.nameIn.focus(); return; }
+      await UI.withBusy(e.currentTarget, async () => {
+        try {
+          await UI.api(`/api/products/${p.product_id}`, { method: "PUT", body: {
+            name: form.st.name.trim(), brand_file: form.st.brand_file, image: form.st.image } });
+          UI.toast("产品配置已保存");
+          mask.querySelector(".close-btn")?.click();
+          load(); UI.emit("products-changed");
+        } catch (e2) { err.textContent = e2.data?.error || e2.message; }
+      }, "保存中……");
+    } }, ["保存配置"]),
+  ]);
+  const mask = UI.drawer("产品配置", el("div", {}, [form.node, access]), foot);
+  mask.querySelector(".drawer")?.classList.add("access-drawer");
+}
+
+function newProductDialog() {
+  const form = productForm({});
+  const err = el("div", { class: "field-error" });
+  const mask = UI.modal("添加产品", el("div", {}, [form.node, err,
+    el("div", { style: "display:flex;justify-content:flex-end;gap:10px;margin-top:12px" }, [
+      el("button", { class: "btn", onclick: () => mask.remove() }, ["取消"]),
+      el("button", { class: "btn primary", onclick: async (e) => {
+        if (!form.st.name.trim()) { form.nameErr.textContent = "请填写产品名称（1-15 字）"; form.nameIn.focus(); return; }
+        await UI.withBusy(e.currentTarget, async () => {
+          try {
+            const r = await UI.api("/api/products", { method: "POST", body: {
+              name: form.st.name.trim(), brand_file: form.st.brand_file, image: form.st.image } });
+            mask.remove();
+            await load();
+            UI.emit("products-changed");   // 侧栏产品切换器同页即时刷新
+            const p = products.find(x => x.product_id === r.product_id);
+            if (p) configProduct(p);
+            UI.toast("产品已创建，接入信息见右侧抽屉");
+          } catch (e2) { form.nameErr.textContent = e2.data?.error || e2.message; }
+        }, "创建中……");
+      } }, ["添加产品"]),
+    ]),
+  ]), null, { persistent: true });
+  setTimeout(() => form.nameIn.focus(), 100);
+}
+
+function draw() {
+  const box = document.getElementById("listBox");
+  box.innerHTML = "";
+  if (!products.length) {
+    box.appendChild(el("div", { class: "card empty-state" }, [
+      el("div", { class: "empty-title" }, ["还没有产品"]),
+      el("div", {}, ["添加产品，把组件和风格主题打包成一个接入点"]),
+      el("button", { class: "btn primary", style: "margin-top:12px", onclick: newProductDialog }, ["添加产品"]),
+    ]));
+    return;
+  }
+  products.forEach(p => {
+    box.appendChild(el("div", { class: "card policy-card", style: "margin-bottom:10px" }, [
+      el("div", { class: "product-list-row" }, [
+        el("img", { class: "product-list-image", src: p.image || sampleProductImage(p), alt: `${p.name} 产品图`, loading: "lazy" }),
+        el("div", { class: "product-list-main" }, [
+          el("div", { class: "product-title-line" }, [
+            el("span", { class: "product-list-name", title: p.name }, [p.name]),
+            el("span", { class: "key-chip static product-list-id", title: "产品 ID" },
+              [el("span", { class: "num" }, ["ID:" + shortProductId(p.product_id)])]),
+          ]),
+        ]),
+        el("div", { style: "flex:1" }),
+        el("span", { class: "prod-actions", style: "display:inline-flex;align-items:center;gap:8px" }, [
+        el("button", { class: "btn small", onclick: () => configProduct(p) }, ["产品配置"]),
+        (() => { const more = el("button", { class: "btn iconic round", title: "更多", "aria-label": "更多操作",
+          onclick: () => { UI.menu(more, [
+            { label: "复制产品", onClick: async () => {
+              // 克隆配置（主题 + 组件集），Key 按新产品自动派生
+              const base = (p.name.length > 12 ? p.name.slice(0, 12) : p.name) + " 副本";
+              for (let i = 0; i < 8; i++) {
+                const name = i === 0 ? base : base + (i + 1);
+                try {
+                  await UI.api("/api/products", { method: "POST", body: { name, brand_file: p.brand_file, image: p.image || "", card_ids: p.card_ids } });
+                  UI.toast(`已复制为「${name}」`); load(); UI.emit("products-changed");
+                  return;
+                } catch (e2) {
+                  if (e2.status !== 409) { UI.toast(e2.data?.error || e2.message, true); return; }
+                }
+              }
+              UI.toast("副本太多了，请先清理", true);
+            } },
+            { label: "删除", danger: true, onClick: async () => {
+              const ok = await UI.confirm("删除产品", `删除「${p.name}」后，它的接入 Key 与注册表立即失效，已出包的 SDK 将无法工作。`, { okText: "删除", danger: true });
+              if (!ok) return;
+              try { await UI.api(`/api/products/${p.product_id}/delete`, { method: "POST" }); UI.toast("已删除"); UI.emit("products-changed"); load().then(() => {
+  // ?new=1 深链（切换器「新建产品」）：自动打开新建弹窗
+  if (new URLSearchParams(location.search).get("new")) newProductDialog();
+}); }
+              catch (e2) { UI.toast(e2.data?.error || e2.message, true); }
+            } },
+          ]); } }, [UI.icon("more", 15)]); return more; })(),
+        ]),
+      ]),
+      (() => {
+        const bound = p.card_ids || [];
+        const online = bound.filter(cid => (allCards.find(x => x.card_id === cid) || {}).status === "published").length;
+        return el("div", { class: "muted", style: "margin-top:14px;line-height:1.7" }, [
+          `风格主题 ${brandName(p.brand_file)} · 组件实例 ${bound.length} 个` +
+          (bound.length ? `（${online} 个在线）` : " · 在组件工作台创建，发布后自动加入"),
+        ]);
+      })(),
+    ]));
+  });
+}
+
+async function load() {
+  const [b, c, pr] = await Promise.all([
+    UI.api("/api/brands").catch(() => ({ brands: [] })),
+    UI.api("/api/cards").catch(() => ({ cards: [] })),
+    UI.api("/api/products").catch(() => ({ products: [] })),
+  ]);
+  brands = b.brands || [];
+  allCards = c.cards || [];
+  liveCards = allCards.filter(x => x.status === "published" || (x.status === "draft" && x.version >= 1));
+  products = pr.products || [];
+  draw();
+}
+UI.on("brands-changed", () => load());   // 主题增删后，产品页的主题下拉同页更新
+const nb = document.getElementById("newBtn");
+nb.append(UI.icon("plus", 14), "添加产品");
+nb.onclick = newProductDialog;
+UI.loading(document.getElementById("listBox"));
+load().catch(e => UI.toast("加载失败：" + e.message, true));
+</script>
+<script>if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js").then(function(reg){reg.update();reg.addEventListener("updatefound",function(){var nw=reg.installing;if(!nw)return;nw.addEventListener("statechange",function(){if(nw.state==="installed"&&navigator.serviceWorker.controller)location.reload();});});}).catch(function(){});</script>
+</body>
+</html>
